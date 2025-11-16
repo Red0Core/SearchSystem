@@ -2,15 +2,67 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from enum import Enum
+from typing import Dict, List, Optional, Sequence, Tuple, TypedDict
 from urllib.parse import parse_qs, urlparse
 
-from .brands import normalize_brand_token, resolve_brand_canonical
+from .brands import find_brand_for_token, normalize_brand_token, resolve_brand_canonical
+
+logger = logging.getLogger(__name__)
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
 URL_PATTERN = re.compile(r"https?://", re.IGNORECASE)
 ARTICLE_CHAR_PATTERN = re.compile(r"^[0-9A-Za-z\-_/\\)]+$")
+
+STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "и",
+    "в",
+    "на",
+    "для",
+    "с",
+    "без",
+    "под",
+    "из",
+    "до",
+    "по",
+    "от",
+    "to",
+    "for",
+    "with",
+    "без",
+    "масло",
+    "фильтр",
+    "к",
+    "как",
+    "and",
+}
+
+
+class QueryKind(str, Enum):
+    URL = "url"
+    ARTICLE = "article"
+    BRAND_ONLY = "brand_only"
+    BRAND_WITH_GENERIC = "brand_with_generic"
+    GENERIC_ONLY = "generic_only"
+    UNKNOWN = "unknown"
+
+
+class QueryClassification(TypedDict, total=False):
+    kind: QueryKind
+    query: str
+    tokens: List[str]
+    brands: List[str]
+    brand_originals: Dict[str, str]
+    generic_tokens: List[str]
+    normalized_code: str
+    url_tokens: List[str]
+
+
 BRAND_SYNONYMS: Dict[str, str] = {
     # fallback mappings if manufacturer.txt is not available
     "kamaz": "kamaz",
@@ -73,6 +125,17 @@ def normalize_code(code: Optional[str]) -> str:
 def normalize_manufacturer(name: Optional[str]) -> str:
     if not name:
         return ""
+    tokens = _tokenize_query(name)
+    for token in tokens:
+        canonical = find_brand_for_token(token)
+        if canonical:
+            return canonical
+    transliterated = transliterate_query(name)
+    if transliterated and transliterated != name:
+        for token in _tokenize_query(transliterated):
+            canonical = find_brand_for_token(token)
+            if canonical:
+                return canonical
     base = normalize_brand_token(name)
     canonical = resolve_brand_canonical(base)
     if canonical:
@@ -133,47 +196,102 @@ def transliterate_query(q: str) -> str:
     return "".join(result)
 
 
-def _detect_brand_in_query(q: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    tokens = re.split(r"[\s,;|]+", q)
+def _tokenize_query(q: str) -> List[str]:
+    return [token for token in re.split(r"[\s,;|/\\]+", q) if token]
+
+
+def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str]]:
+    """Return canonical brand keys plus their original token representation."""
+    found: List[str] = []
+    originals: Dict[str, str] = {}
     for token in tokens:
-        if not token:
-            continue
-        canonical, normalized = _resolve_brand_from_token(token)
-        if canonical:
-            return canonical, normalized, token
-    return None, None, None
+        for variant in _token_variants(token):
+            canonical = find_brand_for_token(variant)
+            if canonical and canonical not in originals:
+                originals[canonical] = token
+                found.append(canonical)
+                break
+    if tokens:
+        logger.debug(
+            "brand_detection: tokens=%s -> brands=%s",
+            list(tokens),
+            found,
+        )
+    return found, originals
 
 
-def _resolve_brand_from_token(token: str) -> Tuple[Optional[str], str]:
+def _token_variants(token: str) -> List[str]:
+    variants: List[str] = []
+    if not token:
+        return variants
+    variants.append(token)
     normalized = normalize_brand_token(token)
-    canonical = resolve_brand_canonical(normalized)
-    if canonical:
-        return canonical, normalized
+    if normalized and normalized not in variants:
+        variants.append(normalized)
     transliterated = transliterate_query(token)
-    normalized_tr = normalize_brand_token(transliterated)
-    canonical_tr = resolve_brand_canonical(normalized_tr)
-    if canonical_tr:
-        return canonical_tr, normalized_tr
-    return None, normalized
+    if transliterated and transliterated not in variants:
+        variants.append(transliterated)
+    return variants
 
 
-def classify_query(q: str) -> Dict[str, object]:
+def _collect_generic_tokens(tokens: Sequence[str], brand_originals: Dict[str, str]) -> List[str]:
+    generic: List[str] = []
+    brand_tokens = set(brand_originals.values())
+    for token in tokens:
+        norm = normalize_brand_token(token)
+        if not norm:
+            continue
+        if token in brand_tokens:
+            continue
+        if norm.isdigit() and len(norm) > 3:
+            # numbers likely part codes -> treat as generic context
+            generic.append(token)
+            continue
+        if norm in STOPWORDS:
+            continue
+        generic.append(token)
+    return generic
+
+
+def classify_query(q: str) -> QueryClassification:
     stripped = (q or "").strip()
-    info: Dict[str, object] = {"type": "text", "query": stripped}
+    info: QueryClassification = {"kind": QueryKind.UNKNOWN, "query": stripped}
     if not stripped:
         return info
     if URL_PATTERN.search(stripped):
         tokens = extract_url_tokens(stripped)
-        info.update({"type": "url", "tokens": tokens})
+        info.update({"kind": QueryKind.URL, "url_tokens": tokens})
         return info
     if is_probable_article_query(stripped) and ARTICLE_CHAR_PATTERN.match(stripped):
-        info.update({"type": "article", "normalized_code": normalize_code(stripped)})
+        info.update({"kind": QueryKind.ARTICLE, "normalized_code": normalize_code(stripped)})
         return info
-    brand_canonical, brand_norm, brand_original = _detect_brand_in_query(stripped)
-    if brand_canonical:
-        info["brand_canonical"] = brand_canonical
-        info["manufacturer_norm"] = brand_canonical
-        info["brand_token"] = brand_original or brand_norm
+
+    tokens = _tokenize_query(stripped)
+    info["tokens"] = tokens
+    if not tokens:
+        return info
+
+    brand_keys, originals = detect_brand_tokens(tokens)
+    generic_tokens = _collect_generic_tokens(tokens, originals)
+    info["brands"] = brand_keys
+    info["brand_originals"] = originals
+    info["generic_tokens"] = generic_tokens
+
+    if brand_keys:
+        if generic_tokens:
+            info["kind"] = QueryKind.BRAND_WITH_GENERIC
+        else:
+            info["kind"] = QueryKind.BRAND_ONLY
+    elif generic_tokens:
+        info["kind"] = QueryKind.GENERIC_ONLY
+    else:
+        info["kind"] = QueryKind.UNKNOWN
+    logger.debug(
+        "classification: %s brands=%s generic=%s",
+        info["kind"],
+        brand_keys,
+        generic_tokens,
+    )
     return info
 
 

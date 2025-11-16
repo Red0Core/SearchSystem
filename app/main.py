@@ -10,6 +10,7 @@ from .es_client import create_index_if_not_exists, get_client, index_is_empty
 from .etl_loader import load_offers_to_es
 from .models import ProductResult, SearchResponse
 from .search_service import search_products
+from .utils import QueryKind
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,7 @@ async def search(q: str = Query(..., description="Search query")) -> SearchRespo
     products = [ProductResult(**item) for item in payload["results"]]
     return SearchResponse(
         query=payload["query"],
+        classification=payload.get("classification", QueryKind.UNKNOWN),
         results=products,
         took_ms=payload["took_ms"],
         eta_ms=payload.get("eta_ms", payload["took_ms"]),

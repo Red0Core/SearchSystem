@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .utils import QueryKind
+
 
 class SearchRequest(BaseModel):
     q: str = Field(..., description="Search query string")
@@ -18,6 +20,7 @@ class ProductResult(BaseModel):
 
 class SearchResponse(BaseModel):
     query: str
+    classification: QueryKind
     results: list[ProductResult]
     took_ms: float
     eta_ms: float
