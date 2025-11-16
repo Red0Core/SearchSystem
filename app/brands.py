@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TypedDict
 
+from rapidfuzz import fuzz, process
+
 from .config import settings
 from .data_files import ensure_data_file
 
@@ -18,6 +20,7 @@ class BrandIndex(TypedDict):
 
 
 _brand_index: Optional[BrandIndex] = None
+_canonical_brands: List[str] = []
 MANUFACTURER_FILE = Path("manufacturer.txt")
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
@@ -153,10 +156,12 @@ def _latin_to_ru(text: str) -> str:
 
 def init_brands(path: str | Path = MANUFACTURER_FILE) -> BrandIndex:
     global _brand_index
+    global _canonical_brands
     if _brand_index is not None:
         return _brand_index
     lines = load_manufacturers(path)
     _brand_index = build_brand_index(lines)
+    _canonical_brands = sorted(_brand_index["synonyms_by_canonical"].keys())
     logger.info(
         "Initialized brand index with %s canonical entries", len(_brand_index["synonyms_by_canonical"])
     )
@@ -165,6 +170,17 @@ def init_brands(path: str | Path = MANUFACTURER_FILE) -> BrandIndex:
 
 def get_brand_index() -> BrandIndex:
     return _brand_index or {"canonical_by_variant": {}, "synonyms_by_canonical": {}}
+
+
+def get_all_canonical_brands() -> List[str]:
+    if _canonical_brands:
+        return _canonical_brands
+    index = get_brand_index()
+    return sorted(index["synonyms_by_canonical"].keys())
+
+
+def is_known_brand_key(key: str) -> bool:
+    return key in get_brand_index().get("synonyms_by_canonical", {})
 
 
 def resolve_brand_canonical(value: str) -> Optional[str]:
@@ -177,3 +193,32 @@ def resolve_brand_canonical(value: str) -> Optional[str]:
 def get_synonyms_for_brand(canonical: str) -> Set[str]:
     index = get_brand_index()
     return index["synonyms_by_canonical"].get(canonical, set())
+
+
+def find_brand_for_token(token: str, *, score_threshold: int = 85) -> Optional[str]:
+    """Resolve a token to a canonical brand using exact or fuzzy matching."""
+    if not token:
+        return None
+    normalized = normalize_brand_token(token)
+    if not normalized:
+        return None
+    canonical = resolve_brand_canonical(normalized)
+    if canonical:
+        return canonical
+    choices = get_all_canonical_brands()
+    if not choices:
+        return None
+    match = process.extractOne(normalized, choices, scorer=fuzz.WRatio)
+    if not match:
+        return None
+    best_brand, score, _ = match
+    if score >= score_threshold:
+        logger.debug(
+            "Fuzzy brand match: token=%r normalized=%r -> %s (score=%s)",
+            token,
+            normalized,
+            best_brand,
+            score,
+        )
+        return best_brand
+    return None

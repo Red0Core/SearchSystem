@@ -10,5 +10,6 @@ dependencies = [
     "redis[hiredis]",
     "pydantic",
     "httpx",
+    "rapidfuzz>=3.14.3",
 ]
 

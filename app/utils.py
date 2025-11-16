@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple, TypedDict
 from urllib.parse import parse_qs, urlparse
 
-from .brands import normalize_brand_token, resolve_brand_canonical
+from .brands import find_brand_for_token, normalize_brand_token, resolve_brand_canonical
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
 URL_PATTERN = re.compile(r"https?://", re.IGNORECASE)
@@ -182,19 +182,6 @@ def transliterate_query(q: str) -> str:
     return "".join(result)
 
 
-def _resolve_brand_from_token(token: str) -> Tuple[Optional[str], str]:
-    normalized = normalize_brand_token(token)
-    canonical = resolve_brand_canonical(normalized)
-    if canonical:
-        return canonical, normalized
-    transliterated = transliterate_query(token)
-    normalized_tr = normalize_brand_token(transliterated)
-    canonical_tr = resolve_brand_canonical(normalized_tr)
-    if canonical_tr:
-        return canonical_tr, normalized_tr
-    return None, normalized
-
-
 def _tokenize_query(q: str) -> List[str]:
     return [token for token in re.split(r"[\s,;|]+", q) if token]
 
@@ -204,7 +191,7 @@ def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str
     found: List[str] = []
     originals: Dict[str, str] = {}
     for token in tokens:
-        canonical, _ = _resolve_brand_from_token(token)
+        canonical = find_brand_for_token(token)
         if canonical and canonical not in originals:
             originals[canonical] = token
             found.append(canonical)
