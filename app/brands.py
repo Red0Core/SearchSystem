@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, TypedDict
+from typing import Dict, List, Optional, Sequence, Set, TypedDict
 
 from rapidfuzz import fuzz, process
 
@@ -38,6 +38,32 @@ SPECIAL_BRAND_OVERRIDES = {
 }
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
+GENERIC_MANUFACTURER_TOKENS = {
+    "запчасти",
+    "детали",
+    "деталь",
+    "гидропривод",
+    "motor",
+    "corporation",
+    "corp",
+    "company",
+    "co",
+    "inc",
+    "ltd",
+    "group",
+    "группа",
+    "компания",
+    "ооо",
+    "zao",
+    "зао",
+    "ooo",
+    "llc",
+    "holding",
+    "завод",
+    "производство",
+    "производитель",
+    "комплекс",
+}
 
 
 def normalize_brand_token(value: Optional[str]) -> str:
@@ -66,38 +92,74 @@ def _extract_tokens(line: str) -> List[str]:
         if not normalized or normalized.isdigit():
             continue
         tokens.append(normalized)
-    # keep order but drop duplicates
     seen: Set[str] = set()
-    unique_tokens: List[str] = []
+    ordered: List[str] = []
     for token in tokens:
         if token in seen:
             continue
         seen.add(token)
-        unique_tokens.append(token)
-    return unique_tokens
+        ordered.append(token)
+    return ordered
+
+
+def _select_canonical(tokens: Sequence[str]) -> str:
+    for token in tokens:
+        if token not in GENERIC_MANUFACTURER_TOKENS:
+            return token
+    return tokens[0]
 
 
 def build_brand_index(manufacturer_lines: List[str]) -> BrandIndex:
     canonical_by_variant: Dict[str, str] = {}
     synonyms_by_canonical: Dict[str, Set[str]] = {}
+
     for line in manufacturer_lines:
         tokens = _extract_tokens(line)
         if not tokens:
             continue
-        canonical = tokens[0]
+        canonical = _select_canonical(tokens)
         synonyms = synonyms_by_canonical.setdefault(canonical, set())
+        _register_variant(canonical, canonical, canonical_by_variant, synonyms)
+
         for token in tokens:
-            canonical_by_variant.setdefault(token, canonical)
-            synonyms.add(token)
-            # Add transliterated mirror token to capture cross alphabet brands
-            mirror = _mirror_token(token)
-            if mirror and mirror not in synonyms:
-                synonyms.add(mirror)
-                canonical_by_variant.setdefault(mirror, canonical)
+            _register_variant(canonical, token, canonical_by_variant, synonyms)
+
+        full_line_variant = normalize_brand_token(line)
+        _register_variant(canonical, full_line_variant, canonical_by_variant, synonyms)
+
     return {
         "canonical_by_variant": canonical_by_variant,
         "synonyms_by_canonical": synonyms_by_canonical,
     }
+
+
+def _register_variant(
+    canonical: str,
+    token: str,
+    canonical_by_variant: Dict[str, str],
+    synonyms: Set[str],
+) -> None:
+    for variant in _variant_forms(token):
+        if not variant:
+            continue
+        if variant not in canonical_by_variant:
+            canonical_by_variant[variant] = canonical
+        synonyms.add(variant)
+
+
+def _variant_forms(token: str) -> Set[str]:
+    variants: Set[str] = set()
+    normalized = normalize_brand_token(token)
+    if normalized:
+        variants.add(normalized)
+    mirror = _mirror_token(token)
+    if mirror:
+        variants.add(mirror)
+    if normalized:
+        mirror_of_norm = _mirror_token(normalized)
+        if mirror_of_norm:
+            variants.add(mirror_of_norm)
+    return variants
 
 
 def _mirror_token(token: str) -> str:
@@ -213,22 +275,26 @@ def find_brand_for_token(token: str, *, score_threshold: int = 65) -> Optional[s
     """Resolve a token to a canonical brand using exact or fuzzy matching."""
     if not token:
         return None
+
+    for variant in _variant_forms(token) or {normalize_brand_token(token)}:
+        if not variant:
+            continue
+        override = SPECIAL_BRAND_OVERRIDES.get(variant)
+        if override:
+            logger.debug(
+                "brand_fuzzy override: token=%r → brand=%s",
+                token,
+                override,
+            )
+            return override
+        canonical = resolve_brand_canonical(variant)
+        if canonical:
+            return canonical
+
     normalized = normalize_brand_token(token)
     if not normalized:
         return None
 
-    override = SPECIAL_BRAND_OVERRIDES.get(normalized)
-    if override:
-        logger.debug(
-            "brand_fuzzy override: token=%r → brand=%s",
-            token,
-            override,
-        )
-        return override
-
-    canonical = resolve_brand_canonical(normalized)
-    if canonical:
-        return canonical
     choices = get_all_canonical_brands()
     if not choices:
         return None

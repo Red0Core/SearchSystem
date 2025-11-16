@@ -125,6 +125,17 @@ def normalize_code(code: Optional[str]) -> str:
 def normalize_manufacturer(name: Optional[str]) -> str:
     if not name:
         return ""
+    tokens = _tokenize_query(name)
+    for token in tokens:
+        canonical = find_brand_for_token(token)
+        if canonical:
+            return canonical
+    transliterated = transliterate_query(name)
+    if transliterated and transliterated != name:
+        for token in _tokenize_query(transliterated):
+            canonical = find_brand_for_token(token)
+            if canonical:
+                return canonical
     base = normalize_brand_token(name)
     canonical = resolve_brand_canonical(base)
     if canonical:
@@ -186,7 +197,7 @@ def transliterate_query(q: str) -> str:
 
 
 def _tokenize_query(q: str) -> List[str]:
-    return [token for token in re.split(r"[\s,;|]+", q) if token]
+    return [token for token in re.split(r"[\s,;|/\\]+", q) if token]
 
 
 def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str]]:
@@ -194,10 +205,12 @@ def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str
     found: List[str] = []
     originals: Dict[str, str] = {}
     for token in tokens:
-        canonical = find_brand_for_token(token)
-        if canonical and canonical not in originals:
-            originals[canonical] = token
-            found.append(canonical)
+        for variant in _token_variants(token):
+            canonical = find_brand_for_token(variant)
+            if canonical and canonical not in originals:
+                originals[canonical] = token
+                found.append(canonical)
+                break
     if tokens:
         logger.debug(
             "brand_detection: tokens=%s -> brands=%s",
@@ -205,6 +218,20 @@ def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str
             found,
         )
     return found, originals
+
+
+def _token_variants(token: str) -> List[str]:
+    variants: List[str] = []
+    if not token:
+        return variants
+    variants.append(token)
+    normalized = normalize_brand_token(token)
+    if normalized and normalized not in variants:
+        variants.append(normalized)
+    transliterated = transliterate_query(token)
+    if transliterated and transliterated not in variants:
+        variants.append(transliterated)
+    return variants
 
 
 def _collect_generic_tokens(tokens: Sequence[str], brand_originals: Dict[str, str]) -> List[str]:

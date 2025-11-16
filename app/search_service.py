@@ -53,20 +53,28 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
     def add_filter(clause: dict) -> None:
         bool_clause["filter"].append(clause)
 
-    def add_text_match(text: str, *, boost: float = 1.0, fields: List[str] | None = None) -> None:
+    def add_text_match(
+        text: str,
+        *,
+        boost: float = 1.0,
+        fields: List[str] | None = None,
+        clause: str = "must",
+    ) -> None:
         if not text:
             return
-        add_must(
-            {
-                "multi_match": {
-                    "query": text,
-                    "fields": fields
-                    or ["title^3", "search_text", "product_code", "manufacturer"],
-                    "fuzziness": "AUTO",
-                    "boost": boost,
-                }
+        clause_body = {
+            "multi_match": {
+                "query": text,
+                "fields": fields
+                or ["title^3", "search_text", "product_code", "manufacturer"],
+                "fuzziness": "AUTO",
+                "boost": boost,
             }
-        )
+        }
+        if clause == "should":
+            add_should(clause_body)
+        else:
+            add_must(clause_body)
 
     def add_phonetic_should(text: str, *, boost: float = 1.0) -> None:
         if not text:
@@ -140,7 +148,7 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
     if kind == QueryKind.BRAND_ONLY:
         apply_brand_filter()
         add_brand_should(boost=2.5)
-        add_text_match(query_text, boost=1.0, fields=["title^2", "search_text"])
+        add_text_match(query_text, boost=0.8, fields=["title^2", "search_text"], clause="should")
     elif kind == QueryKind.BRAND_WITH_GENERIC:
         apply_brand_filter()
         if generic_text:
