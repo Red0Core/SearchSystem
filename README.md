@@ -15,6 +15,19 @@ A minimal FastAPI-based REST search service backed by Elasticsearch 9.2.1 and op
 uv sync
 ```
 
+### Data files
+
+The service requires `offers.json` and `manufacturer.txt`. If those files are missing locally,
+provide download locations via environment variables so the app can fetch them automatically:
+
+```bash
+export OFFERS_SOURCE_URL="https://example.com/offers.json"
+export MANUFACTURERS_SOURCE_URL="https://example.com/manufacturer.txt"
+```
+
+When the environment variables are unset, the application expects both files to already be
+present in the project root.
+
 ## Running the API
 
 ```bash

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .brands import init_brands
 from .config import settings
+from .data_files import ensure_data_file
 from .es_client import create_index_if_not_exists, index_documents
 from .utils import normalize_code, normalize_manufacturer, transliterate_query
 
@@ -35,9 +36,8 @@ def _prepare_document(raw: dict) -> dict:
 
 def load_offers_to_es() -> int:
     init_brands()
-    if not DATA_FILE.exists():
-        raise FileNotFoundError(f"Offers data file not found: {DATA_FILE}")
-    with DATA_FILE.open("r", encoding="utf-8") as fh:
+    data_file = ensure_data_file(DATA_FILE, settings.offers_source_url or None)
+    with data_file.open("r", encoding="utf-8") as fh:
         raw_offers = json.load(fh)
     documents = [_prepare_document(item) for item in raw_offers]
     create_index_if_not_exists()
