@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .brands import init_brands
 from .config import settings
@@ -16,6 +19,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Product Search Service")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.on_event("startup")
@@ -38,6 +42,12 @@ async def health() -> dict:
         "elasticsearch": es_health.get("status"),
         "index": settings.es_index,
     }
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
+    index_path = os.path.join("static", "index.html")
+    return FileResponse(index_path)
 
 
 @app.get("/search", response_model=SearchResponse)
