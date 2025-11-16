@@ -1,0 +1,7 @@
+FROM docker.elastic.co/elasticsearch/elasticsearch:9.2.1
+
+# Устанавливаем phonetic plugin
+RUN elasticsearch-plugin install --batch analysis-phonetic
+
+# Можно сразу немного настроить JVM и single-node режим
+ENV discovery.type=single-node
