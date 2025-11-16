@@ -1,0 +1,16 @@
+# Sample manufacturer dictionary (subset)
+Toyota Motor Corporation
+ТОЙОТА
+Kamaz PTC
+КАМАЗ
+Komatsu Ltd
+КОМАТСУ
+Gazpromneft Lubricants
+Газпромнефть
+Samsung Electronics
+САМСУНГ
+Caterpillar Inc
+КАTЕРПИЛЛАР
+JCB
+Hitachi Construction Machinery
+Гидропривод ТОЙОТА

@@ -1,0 +1,15 @@
+[project]
+name = "search-service"
+version = "0.1.0"
+description = "Minimal REST search service for product offers"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "elasticsearch>=9.0.0",
+    "redis[hiredis]",
+    "pydantic",
+    "httpx",
+    "rapidfuzz>=3.14.3",
+]
+
