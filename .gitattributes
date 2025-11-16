@@ -1,0 +1,2 @@
+offers.json filter=lfs diff=lfs merge=lfs -text
+queries_example.txt filter=lfs diff=lfs merge=lfs -text
