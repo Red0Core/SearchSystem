@@ -34,8 +34,6 @@ STOPWORDS = {
     "to",
     "for",
     "with",
-    "без",
-    "масло",
     "фильтр",
     "к",
     "как",
@@ -73,6 +71,10 @@ BRAND_SYNONYMS: Dict[str, str] = {
     "газпромнефть": "gazpromneft",
     "samsung": "samsung",
     "самсунг": "samsung",
+    "lukoil": "lukoil",
+    "лукойл": "lukoil",
+    "бош": "bosch",
+    "bosch": "bosch",
 }
 
 # Simple transliteration map (Russian -> Latin). This is not exhaustive but
@@ -142,7 +144,7 @@ def normalize_manufacturer(name: Optional[str]) -> str:
         return canonical
     if base in BRAND_SYNONYMS:
         return BRAND_SYNONYMS[base]
-    return base
+    return ""
 
 
 def is_probable_article_query(q: str) -> bool:
@@ -205,6 +207,9 @@ def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str
     found: List[str] = []
     originals: Dict[str, str] = {}
     for token in tokens:
+        normalized = normalize_brand_token(token)
+        if normalized in STOPWORDS:
+            continue
         for variant in _token_variants(token):
             canonical = find_brand_for_token(variant)
             if canonical and canonical not in originals:

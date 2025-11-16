@@ -21,6 +21,7 @@ def _prepare_document(raw: dict) -> dict:
     product_code = raw.get("product_code", "")
     title = raw.get("title", "")
     search_text = " ".join(part for part in [manufacturer, product_code, title] if part)
+    manufacturer_normalized = normalize_manufacturer(manufacturer)
     document = {
         "id": raw["id"],
         "manufacturer": manufacturer,
@@ -29,8 +30,9 @@ def _prepare_document(raw: dict) -> dict:
         "search_text": search_text,
         "search_text_tr": transliterate_query(search_text),
         "product_code_normalized": normalize_code(product_code),
-        "manufacturer_normalized": normalize_manufacturer(manufacturer),
     }
+    if manufacturer_normalized:
+        document["manufacturer_normalized"] = manufacturer_normalized
     return document
 
 

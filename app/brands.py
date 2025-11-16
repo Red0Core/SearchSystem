@@ -35,6 +35,8 @@ SPECIAL_BRAND_OVERRIDES = {
     "тойёта": "toyota",
     "тойета": "toyota",
     "мерсес": "mercedes",
+    "лукойл": "lukoil",
+    "лукоил": "lukoil",
 }
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
@@ -117,7 +119,12 @@ def build_brand_index(manufacturer_lines: List[str]) -> BrandIndex:
         tokens = _extract_tokens(line)
         if not tokens:
             continue
+
         canonical = _select_canonical(tokens)
+        reused = _existing_canonical_for_token(canonical, canonical_by_variant)
+        if reused:
+            canonical = reused
+
         synonyms = synonyms_by_canonical.setdefault(canonical, set())
         _register_variant(canonical, canonical, canonical_by_variant, synonyms)
 
@@ -131,6 +138,13 @@ def build_brand_index(manufacturer_lines: List[str]) -> BrandIndex:
         "canonical_by_variant": canonical_by_variant,
         "synonyms_by_canonical": synonyms_by_canonical,
     }
+
+
+def _existing_canonical_for_token(token: str, canonical_by_variant: Dict[str, str]) -> Optional[str]:
+    for variant in _variant_forms(token):
+        if variant in canonical_by_variant:
+            return canonical_by_variant[variant]
+    return None
 
 
 def _register_variant(
@@ -204,6 +218,7 @@ RU_TO_LATIN = {
     "э": "e",
     "ю": "yu",
     "я": "ya",
+    "ой": "oi",
 }
 LATIN_TO_RU = {v: k for k, v in RU_TO_LATIN.items() if v}
 

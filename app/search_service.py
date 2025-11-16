@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
-from typing import Dict, List
+from typing import Dict, List, Set
 
+from .brands import get_synonyms_for_brand
 from .cache import get_cache
 from .config import settings
 from .es_client import search_es
@@ -126,9 +127,17 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
     generic_text = " ".join(generic_tokens).strip()
     brand_focus = " ".join(brand_originals.values()).strip() or query_text
 
+    def brand_filter_values() -> List[str]:
+        values: Set[str] = set()
+        for brand in brands:
+            values.add(brand)
+            values.update(get_synonyms_for_brand(brand))
+        return [value for value in values if value]
+
     def apply_brand_filter() -> None:
-        if brands:
-            add_filter({"terms": {"manufacturer_normalized": brands}})
+        filter_terms = brand_filter_values()
+        if filter_terms:
+            add_filter({"terms": {"manufacturer_normalized": filter_terms}})
 
     def add_brand_should(boost: float = 2.0) -> None:
         if not brand_focus:
