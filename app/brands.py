@@ -23,6 +23,20 @@ _brand_index: Optional[BrandIndex] = None
 _canonical_brands: List[str] = []
 MANUFACTURER_FILE = Path("manufacturer.txt")
 
+SPECIAL_BRAND_OVERRIDES = {
+    "комз": "kamaz",
+    "комаз": "kamaz",
+    "кемаз": "kamaz",
+    "кама3": "kamaz",
+    "камазз": "kamaz",
+    "кэмз": "kamaz",
+    "тайота": "toyota",
+    "таёта": "toyota",
+    "тойёта": "toyota",
+    "тойета": "toyota",
+    "мерсес": "mercedes",
+}
+
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
 
 
@@ -195,30 +209,78 @@ def get_synonyms_for_brand(canonical: str) -> Set[str]:
     return index["synonyms_by_canonical"].get(canonical, set())
 
 
-def find_brand_for_token(token: str, *, score_threshold: int = 85) -> Optional[str]:
+def find_brand_for_token(token: str, *, score_threshold: int = 65) -> Optional[str]:
     """Resolve a token to a canonical brand using exact or fuzzy matching."""
     if not token:
         return None
     normalized = normalize_brand_token(token)
     if not normalized:
         return None
+
+    override = SPECIAL_BRAND_OVERRIDES.get(normalized)
+    if override:
+        logger.debug(
+            "brand_fuzzy override: token=%r → brand=%s",
+            token,
+            override,
+        )
+        return override
+
     canonical = resolve_brand_canonical(normalized)
     if canonical:
         return canonical
     choices = get_all_canonical_brands()
     if not choices:
         return None
-    match = process.extractOne(normalized, choices, scorer=fuzz.WRatio)
+    match = process.extractOne(
+        normalized,
+        choices,
+        scorer=fuzz.WRatio,
+        score_cutoff=score_threshold,
+    )
     if not match:
         return None
     best_brand, score, _ = match
-    if score >= score_threshold:
-        logger.debug(
-            "Fuzzy brand match: token=%r normalized=%r -> %s (score=%s)",
-            token,
-            normalized,
-            best_brand,
-            score,
-        )
-        return best_brand
-    return None
+    if not _passes_brand_family_guard(normalized, best_brand):
+        return None
+    logger.debug(
+        "brand_fuzzy: token=%r → brand=%s score=%s",
+        token,
+        best_brand,
+        score,
+    )
+    return best_brand
+
+
+def _passes_brand_family_guard(source: str, candidate: str) -> bool:
+    if not source or not candidate:
+        return False
+    if not _first_letter_guard(source, candidate):
+        return False
+    return _length_guard(source, candidate)
+
+
+def _first_letter_guard(source: str, candidate: str) -> bool:
+    source_letters = _first_letter_variants(source)
+    candidate_letters = _first_letter_variants(candidate)
+    return bool(source_letters & candidate_letters)
+
+
+def _first_letter_variants(value: str) -> Set[str]:
+    letters: Set[str] = set()
+    if value:
+        letters.add(value[0])
+    mirror = _mirror_token(value)
+    if mirror:
+        letters.add(mirror[0])
+    return letters
+
+
+def _length_guard(source: str, candidate: str) -> bool:
+    diff = abs(len(source) - len(candidate))
+    max_len = max(len(source), len(candidate))
+    if max_len <= 3:
+        return diff == 0
+    if max_len <= 6:
+        return diff <= 2
+    return diff <= 3

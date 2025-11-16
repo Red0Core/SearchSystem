@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from enum import Enum
 from typing import Dict, List, Optional, Sequence, Tuple, TypedDict
 from urllib.parse import parse_qs, urlparse
 
 from .brands import find_brand_for_token, normalize_brand_token, resolve_brand_canonical
+
+logger = logging.getLogger(__name__)
 
 CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
 URL_PATTERN = re.compile(r"https?://", re.IGNORECASE)
@@ -195,6 +198,12 @@ def detect_brand_tokens(tokens: Sequence[str]) -> Tuple[List[str], Dict[str, str
         if canonical and canonical not in originals:
             originals[canonical] = token
             found.append(canonical)
+    if tokens:
+        logger.debug(
+            "brand_detection: tokens=%s -> brands=%s",
+            list(tokens),
+            found,
+        )
     return found, originals
 
 
@@ -250,6 +259,12 @@ def classify_query(q: str) -> QueryClassification:
         info["kind"] = QueryKind.GENERIC_ONLY
     else:
         info["kind"] = QueryKind.UNKNOWN
+    logger.debug(
+        "classification: %s brands=%s generic=%s",
+        info["kind"],
+        brand_keys,
+        generic_tokens,
+    )
     return info
 
 

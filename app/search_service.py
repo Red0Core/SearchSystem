@@ -24,7 +24,7 @@ cache = get_cache()
 def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
     base_query = {
         "size": settings.search_result_size,
-        "query": {"bool": {"should": [], "minimum_should_match": 1}},
+        "query": {"bool": {"should": [], "must": [], "minimum_should_match": 1}},
     }
     bool_clause = base_query["query"]["bool"]
 
@@ -34,6 +34,9 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
 
     def add_should(clause: dict) -> None:
         bool_clause["should"].append(clause)
+
+    def add_must(clause: dict) -> None:
+        bool_clause["must"].append(clause)
 
     if kind == QueryKind.ARTICLE:
         normalized = classification.get("normalized_code") or normalize_code(query_text)
@@ -102,6 +105,11 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
             }
         )
 
+    def enforce_brand_filter() -> None:
+        if not brands:
+            return
+        add_must({"terms": {"manufacturer_normalized": brands}})
+
     def add_text_clauses(text: str, boost: float = 1.0) -> None:
         if not text:
             return
@@ -128,15 +136,19 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
 
     # Textual classes
     if kind == QueryKind.BRAND_ONLY:
-        add_brand_terms(boost=5.0)
+        enforce_brand_filter()
+        bool_clause["minimum_should_match"] = 0
+        add_brand_terms(boost=4.0)
         add_brand_phonetic(boost=2.0)
         add_text_clauses(query_text, boost=0.8)
     elif kind == QueryKind.BRAND_WITH_GENERIC:
-        add_brand_terms(boost=4.0)
-        add_brand_phonetic(boost=1.5)
-        add_text_clauses(query_text, boost=1.2)
-        if generic_text and generic_text != query_text:
-            add_text_clauses(generic_text, boost=1.0)
+        enforce_brand_filter()
+        bool_clause["minimum_should_match"] = 0
+        add_brand_terms(boost=3.5)
+        add_brand_phonetic(boost=1.7)
+        if generic_tokens:
+            add_text_clauses(generic_text, boost=1.4)
+        add_text_clauses(query_text, boost=1.0)
     elif kind in (QueryKind.GENERIC_ONLY, QueryKind.UNKNOWN):
         add_text_clauses(query_text, boost=1.0)
     else:
