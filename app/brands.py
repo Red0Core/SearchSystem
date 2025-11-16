@@ -218,13 +218,9 @@ RU_TO_LATIN = {
     "э": "e",
     "ю": "yu",
     "я": "ya",
+    "ой": "oi",
 }
 LATIN_TO_RU = {v: k for k, v in RU_TO_LATIN.items() if v}
-LATIN_TO_RU.update(
-    {
-        "oi": "ой",
-    }
-)
 
 
 def _ru_to_latin(text: str) -> str:

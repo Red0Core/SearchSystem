@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  elasticsearch:
+    build:
+      context: .                 # текущая папка, где лежит Dockerfile.elasticsearch
+      dockerfile: Dockerfile.elasticsearch
+    container_name: elasticsearch
+    environment:
+      - xpack.security.enabled=false        # без авторизации
+      - discovery.type=single-node         # одиночный узел, обязательно!
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+volumes:
+  elasticsearch_data:

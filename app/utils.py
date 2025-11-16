@@ -34,19 +34,10 @@ STOPWORDS = {
     "to",
     "for",
     "with",
-    "масло",
-    "масла",
-    "моторное",
-    "моторные",
     "фильтр",
     "к",
     "как",
     "and",
-    "oil",
-    "engine",
-    "motor",
-    "lubricant",
-    "lubricants",
 }
 
 
@@ -82,6 +73,8 @@ BRAND_SYNONYMS: Dict[str, str] = {
     "самсунг": "samsung",
     "lukoil": "lukoil",
     "лукойл": "lukoil",
+    "бош": "bosch",
+    "bosch": "bosch",
 }
 
 # Simple transliteration map (Russian -> Latin). This is not exhaustive but
