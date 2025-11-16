@@ -11,6 +11,3 @@ dependencies = [
     "pydantic",
     "httpx",
 ]
-
-[tool.uv]
-default-groups = ["default"]
