@@ -8,6 +8,10 @@ from typing import Iterable
 import httpx
 
 API_URL = "http://localhost:8000/search"
+MAX_RESULTS = 100
+GREEN = "\033[92m"
+RED = "\033[91m"
+RESET = "\033[0m"
 
 
 def perform_query(query: str) -> dict:
@@ -38,13 +42,15 @@ def interactive_shell() -> None:
 
 def pretty_print_response(query: str, payload: dict) -> None:
     results = payload.get("results", [])
-    took = payload.get("took_ms", 0)
-    print(f"Query: {query} | results: {len(results)} | took: {took:.1f} ms")
-    for item in results[:5]:
+    eta = float(payload.get("eta_ms", payload.get("took_ms", 0)))
+    color = GREEN if eta < 200 else RED
+    eta_label = f"{color}{eta:.1f} ms{RESET}"
+    print(f"Query: {query} | results: {len(results)} | ETA: {eta_label}")
+    for idx, item in enumerate(results[:MAX_RESULTS], start=1):
         score = item.get("score")
         score_repr = f"{score:.2f}" if isinstance(score, (int, float)) else "-"
         print(
-            f"  - score={score_repr} | {item.get('manufacturer')} | "
+            f"  {idx:02d}. score={score_repr} | {item.get('manufacturer')} | "
             f"{item.get('product_code')} | {item.get('title')}"
         )
 

@@ -45,7 +45,12 @@ async def search(q: str = Query(..., description="Search query")) -> SearchRespo
         raise HTTPException(status_code=400, detail="Query must not be empty")
     payload = search_products(q)
     products = [ProductResult(**item) for item in payload["results"]]
-    return SearchResponse(query=payload["query"], results=products, took_ms=payload["took_ms"])
+    return SearchResponse(
+        query=payload["query"],
+        results=products,
+        took_ms=payload["took_ms"],
+        eta_ms=payload.get("eta_ms", payload["took_ms"]),
+    )
 
 
 @app.post("/reindex")

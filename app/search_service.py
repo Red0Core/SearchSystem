@@ -16,7 +16,7 @@ cache = get_cache()
 
 def build_es_query(raw_query: str, classification: Dict[str, object]) -> dict:
     base_query = {
-        "size": 20,
+        "size": settings.search_result_size,
         "query": {
             "bool": {
                 "should": [],
@@ -151,6 +151,11 @@ def search_products(raw_query: str) -> Dict[str, object]:
         }
         for hit in hits
     ]
-    response = {"query": raw_query, "results": results, "took_ms": took_ms}
+    response = {
+        "query": raw_query,
+        "results": results,
+        "took_ms": took_ms,
+        "eta_ms": took_ms,
+    }
     cache.set(cache_key, response, settings.cache_ttl_seconds)
     return response

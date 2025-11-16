@@ -6,6 +6,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TypedDict
 
+from .config import settings
+from .data_files import ensure_data_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,10 +31,7 @@ def normalize_brand_token(value: Optional[str]) -> str:
 
 
 def load_manufacturers(path: str | Path = MANUFACTURER_FILE) -> List[str]:
-    file_path = Path(path)
-    if not file_path.exists():
-        logger.warning("Manufacturer dictionary file not found: %s", file_path)
-        return []
+    file_path = ensure_data_file(path, settings.manufacturers_source_url or None)
     lines: List[str] = []
     with file_path.open("r", encoding="utf-8", errors="ignore") as handle:
         for raw_line in handle:

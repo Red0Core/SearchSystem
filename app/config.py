@@ -20,6 +20,9 @@ class Settings:
     redis_port: int = int(_get_env("REDIS_PORT", "6379"))
     cache_ttl_seconds: int = int(_get_env("CACHE_TTL_SECONDS", "60"))
     load_on_startup: bool = _get_env("LOAD_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
+    search_result_size: int = int(_get_env("SEARCH_RESULT_SIZE", "100"))
+    offers_source_url: str = _get_env("OFFERS_SOURCE_URL", "")
+    manufacturers_source_url: str = _get_env("MANUFACTURERS_SOURCE_URL", "")
 
 
 settings = Settings()

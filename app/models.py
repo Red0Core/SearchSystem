@@ -20,3 +20,4 @@ class SearchResponse(BaseModel):
     query: str
     results: list[ProductResult]
     took_ms: float
+    eta_ms: float

@@ -5,7 +5,7 @@ import logging
 from typing import Iterable
 
 from elasticsearch import Elasticsearch, helpers
-from elasticsearch.exceptions import NotFoundError
+from elasticsearch.exceptions import BadRequestError, NotFoundError
 
 from .config import settings
 
@@ -14,27 +14,54 @@ logger = logging.getLogger(__name__)
 _client: Elasticsearch | None = None
 
 
+ANALYSIS_FILTERS = {
+    "russian_stop": {
+        "type": "stop",
+        "stopwords": "_russian_",
+    },
+    "russian_stemmer": {
+        "type": "stemmer",
+        "language": "russian",
+    },
+    "english_stop": {
+        "type": "stop",
+        "stopwords": "_english_",
+    },
+    "english_stemmer": {
+        "type": "stemmer",
+        "language": "english",
+    },
+    "brand_phonetic": {
+        "type": "phonetic",
+        "encoder": "double_metaphone",
+        "replace": True,
+    },
+}
+
+ANALYSIS_ANALYZERS = {
+    "ru_en_search": {
+        "type": "custom",
+        "tokenizer": "standard",
+        "filter": [
+            "lowercase",
+            "russian_stop",
+            "english_stop",
+            "russian_stemmer",
+            "english_stemmer",
+            "asciifolding",
+        ],
+    },
+    "brand_phonetic_analyzer": {
+        "tokenizer": "standard",
+        "filter": ["lowercase", "brand_phonetic"],
+    },
+}
+
 INDEX_BODY = {
     "settings": {
         "analysis": {
-            "filter": {
-                "brand_phonetic": {
-                    "type": "phonetic",
-                    "encoder": "double_metaphone",
-                    "replace": True,
-                }
-            },
-            "analyzer": {
-                "ru_en_search": {
-                    "type": "custom",
-                    "tokenizer": "standard",
-                    "filter": ["lowercase", "russian_stop", "russian_stemmer"],
-                },
-                "brand_phonetic_analyzer": {
-                    "tokenizer": "standard",
-                    "filter": ["lowercase", "brand_phonetic"],
-                },
-            },
+            "filter": ANALYSIS_FILTERS,
+            "analyzer": ANALYSIS_ANALYZERS,
         }
     },
     "mappings": {
@@ -84,7 +111,15 @@ def create_index_if_not_exists() -> None:
     if client.indices.exists(index=settings.es_index):
         return
     logger.info("Creating index %s", settings.es_index)
-    client.indices.create(index=settings.es_index, body=INDEX_BODY)
+    try:
+        client.indices.create(index=settings.es_index, body=INDEX_BODY)
+    except BadRequestError as exc:
+        # When concurrent index creation happens we may see a race.
+        if exc.error == "resource_already_exists_exception":
+            logger.info("Index %s already exists", settings.es_index)
+            return
+        logger.error("Failed to create index %s: %s", settings.es_index, exc)
+        raise
 
 
 def index_documents(documents: Iterable[dict]) -> None:
