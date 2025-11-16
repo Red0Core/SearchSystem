@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>SearchSystem UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 min-h-screen">
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-800">SearchSystem</h1>
+      <p class="text-sm text-slate-500">
+        Поиск по товарам: бренды, артикулы, описания.
+      </p>
+    </header>
+
+    <!-- Search form -->
+    <section class="mb-4">
+      <div class="flex gap-2">
+        <input
+          id="search-input"
+          type="text"
+          class="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          placeholder="Введите запрос: артикул, бренд, описание..."
+        />
+        <button
+          id="search-button"
+          class="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
+        >
+          Найти
+        </button>
+      </div>
+    </section>
+
+    <!-- Status -->
+    <section class="mb-4">
+      <div id="status" class="text-xs text-slate-600 bg-white rounded-md border border-slate-200 px-3 py-2">
+        Введите запрос и нажмите «Найти».
+      </div>
+    </section>
+
+    <!-- Main layout: results + history -->
+    <section class="grid grid-cols-1 md:grid-cols-[2fr,1fr] gap-4">
+      <!-- Results -->
+      <div class="bg-white rounded-md border border-slate-200 shadow-sm">
+        <div class="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-slate-700">Результаты</h2>
+          <span id="results-count" class="text-xs text-slate-400"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase border-b border-slate-200">
+              <tr>
+                <th class="px-3 py-2 text-left">Производитель</th>
+                <th class="px-3 py-2 text-left">Артикул</th>
+                <th class="px-3 py-2 text-left">Название</th>
+                <th class="px-3 py-2 text-right">Score</th>
+              </tr>
+            </thead>
+            <tbody id="results-body" class="divide-y divide-slate-100">
+              <!-- rows go here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- History -->
+      <aside class="bg-white rounded-md border border-slate-200 shadow-sm">
+        <div class="px-3 py-2 border-b border-slate-100">
+          <h2 class="text-sm font-semibold text-slate-700">История запросов</h2>
+        </div>
+        <div id="history" class="px-3 py-2 text-xs text-slate-600 space-y-2">
+          <p class="text-slate-400">История пока пуста.</p>
+        </div>
+      </aside>
+    </section>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
