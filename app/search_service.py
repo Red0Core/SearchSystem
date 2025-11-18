@@ -33,7 +33,12 @@ def _base_query(size: int) -> dict:
     }
 
 
-def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
+def build_es_query(
+    raw_query: str,
+    classification: QueryClassification,
+    *,
+    allow_brand_filter: bool = True,
+) -> dict:
     query_text = (classification.get("query") or raw_query).strip() or raw_query
     transliterated = transliterate_query(query_text)
     kind = classification.get("kind", QueryKind.UNKNOWN)
@@ -138,9 +143,13 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
 
     brand_focus = focus_label() or query_text
 
+    brand_filter_applied = False
+
     def apply_brand_filter() -> None:
-        if brands:
+        nonlocal brand_filter_applied
+        if brands and allow_brand_filter:
             add_filter({"terms": {"manufacturer_brand_tokens": brands}})
+            brand_filter_applied = True
 
     def add_brand_boost(boost: float = 4.0) -> None:
         if not brands:
@@ -171,11 +180,11 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
         add_text_match(query_text, boost=0.8, fields=["title^2", "search_text"], clause="should")
         bool_clause["minimum_should_match"] = 1
     elif kind == QueryKind.BRAND_WITH_GENERIC:
-        if generic_text:
-            add_text_match(generic_text, boost=1.3)
-        else:
-            add_text_match(query_text, boost=1.0)
-        add_brand_boost(boost=5.0)
+        if brands:
+            apply_brand_filter()
+        text_for_match = generic_text if (generic_text and brand_filter_applied) else query_text
+        add_text_match(text_for_match, boost=1.3 if brand_filter_applied else 1.1)
+        add_brand_boost(boost=5.0 if brand_filter_applied else 3.0)
     elif kind in (QueryKind.GENERIC_ONLY, QueryKind.UNKNOWN):
         add_text_match(query_text, boost=1.0)
     else:
@@ -214,19 +223,44 @@ def search_products(raw_query: str) -> Dict[str, object]:
     query_body = build_es_query(normalized_query, classification)
     t2 = perf_counter()
     es_response = search_es(query_body)
-    t3 = perf_counter()
+    used_fallback = False
+
+    def _extract_hits(response: Dict[str, object]) -> List[dict]:
+        hits_payload = response.get("hits", {}).get("hits", [])
+        return [
+            {
+                "id": hit.get("_source", {}).get("id"),
+                "manufacturer": hit.get("_source", {}).get("manufacturer"),
+                "product_code": hit.get("_source", {}).get("product_code"),
+                "title": hit.get("_source", {}).get("title"),
+                "score": hit.get("_score"),
+            }
+            for hit in hits_payload
+        ]
 
     hits = es_response.get("hits", {}).get("hits", [])
-    results = [
-        {
-            "id": hit.get("_source", {}).get("id"),
-            "manufacturer": hit.get("_source", {}).get("manufacturer"),
-            "product_code": hit.get("_source", {}).get("product_code"),
-            "title": hit.get("_source", {}).get("title"),
-            "score": hit.get("_score"),
-        }
-        for hit in hits
-    ]
+    if (
+        classification.get("kind") == QueryKind.BRAND_WITH_GENERIC
+        and classification.get("brands")
+        and len(hits) < settings.brand_fallback_min_hits
+    ):
+        logger.info(
+            "brand_fallback: q=%r initial_hits=%s threshold=%s",
+            normalized_query,
+            len(hits),
+            settings.brand_fallback_min_hits,
+        )
+        fallback_body = build_es_query(
+            normalized_query,
+            classification,
+            allow_brand_filter=False,
+        )
+        es_response = search_es(fallback_body)
+        hits = es_response.get("hits", {}).get("hits", [])
+        used_fallback = True
+
+    t3 = perf_counter()
+    results = _extract_hits(es_response)
     t4 = perf_counter()
 
     classify_ms = (t1 - t0) * 1000
@@ -236,7 +270,7 @@ def search_products(raw_query: str) -> Dict[str, object]:
     total_ms = (t4 - t0) * 1000
     kind_serialized = _serialize_kind(classification.get("kind"))
     logger.info(
-        "timing: total=%.2fms classify=%.2fms build=%.2fms es=%.2fms post=%.2fms q=%r kind=%s brands=%s",
+        "timing: total=%.2fms classify=%.2fms build=%.2fms es=%.2fms post=%.2fms q=%r kind=%s brands=%s fallback=%s",
         total_ms,
         classify_ms,
         build_ms,
@@ -245,6 +279,7 @@ def search_products(raw_query: str) -> Dict[str, object]:
         normalized_query,
         kind_serialized,
         classification.get("brands", []),
+        int(used_fallback),
     )
 
     response = {

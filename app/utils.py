@@ -173,8 +173,9 @@ def classify_query(q: str) -> QueryClassification:
         info["kind"] = QueryKind.GENERIC_ONLY
     else:
         info["kind"] = QueryKind.UNKNOWN
-    logger.debug(
-        "classification: %s brands=%s generic=%s",
+    logger.info(
+        "classify: q=%r kind=%s brands=%s non_brand_terms=%s",
+        stripped,
         info["kind"],
         brand_keys,
         non_brand_terms,

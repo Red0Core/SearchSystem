@@ -63,12 +63,17 @@ PRE_TRANSLIT_OVERRIDES = {
     "таёта": "toyota",
     "тойёта": "toyota",
     "тойета": "toyota",
+    "тойтоа": "toyota",
+    "таиота": "toyota",
+    "таета": "toyota",
     "лексус": "lexus",
     "лэксус": "lexus",
     "лехсус": "lexus",
     "лехус": "lexus",
+    "лекс": "lexus",
     "лукойл": "lukoil",
     "лукоил": "lukoil",
+    "лукоел": "lukoil",
 }
 POST_TRANSLIT_OVERRIDES = {
     "toiota": "toyota",
@@ -76,13 +81,34 @@ POST_TRANSLIT_OVERRIDES = {
     "tayota": "toyota",
     "toyeta": "toyota",
     "toyata": "toyota",
-    "leksus": "lexus",
+    "toitoa": "toyota",
+    "taiota": "toyota",
     "lexsus": "lexus",
+    "leksus": "lexus",
     "lecsus": "lexus",
     "leksis": "lexus",
     "lukoil": "lukoil",
+    "lukoyl": "lukoil",
 }
-MAJOR_BRAND_IDS = {"toyota", "lexus", "nissan", "infiniti", "honda", "acura"}
+MAJOR_BRAND_IDS = {"toyota", "lexus", "nissan", "infiniti", "honda", "acura", "lukoil"}
+HARDCODED_BRANDS = {
+    "toyota": {
+        "Toyota",
+        "TOYOTA",
+        "ТОЙОТА",
+        "Toyota Motor Corporation",
+    },
+    "lexus": {
+        "LEXUS",
+        "Lexus",
+        "Лексус",
+    },
+    "lukoil": {
+        "LUKOIL",
+        "ЛУКОЙЛ",
+        "Lukoil",
+    },
+}
 QUERY_STOPWORDS = {
     "the",
     "a",
@@ -292,6 +318,9 @@ def build_brand_catalog(lines: Sequence[str]) -> Tuple[Dict[str, Brand], Dict[st
             continue
         for segment in _split_segments(line):
             _register_brand(segment, brands, token_map)
+    for labels in HARDCODED_BRANDS.values():
+        for label in labels:
+            _register_brand(label, brands, token_map)
     return brands, token_map
 
 
