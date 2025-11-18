@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 MANUFACTURER_FILE = Path("manufacturer.txt")
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-zА-Яа-яЁё]+")
 ARTICLE_CODE_PATTERN = re.compile(
-    r"^(?:[A-Z]{2}\d{3,}|\d{3,}[-/]\d+|[A-Z0-9-]{6,})$",
+    r"^(?:[A-Z]{2}\d{3,}|\d{3,}[-/]\d+|(?=.*\d)[A-Z0-9-]{6,})$",
     re.IGNORECASE,
 )
-GENERIC_LABEL_TOKENS = {
+GENERIC_LABEL_WORDS = {
     "group",
     "company",
     "co",
@@ -29,6 +29,72 @@ GENERIC_LABEL_TOKENS = {
     "motors",
     "automotive",
     "factory",
+    "industries",
+    "holding",
+    "parts",
+    "detail",
+    "details",
+    "service",
+    "services",
+    "equipment",
+    "machines",
+    "machinery",
+    "products",
+    "product",
+    "systems",
+    "system",
+    "brand",
+    "oil",
+    "lubricant",
+    "lubricants",
+    "fluid",
+    "fluids",
+    "liquid",
+    "grease",
+    "filter",
+    "filters",
+    "bearing",
+    "bearings",
+    "seal",
+    "seals",
+    "gasket",
+    "gaskets",
+    "ring",
+    "rings",
+    "belt",
+    "belts",
+    "hose",
+    "hoses",
+    "pipe",
+    "pipes",
+    "tube",
+    "tubes",
+    "pump",
+    "pumps",
+    "valve",
+    "valves",
+    "cylinder",
+    "cylinders",
+    "liner",
+    "liners",
+    "piston",
+    "pistons",
+    "bolt",
+    "bolts",
+    "nut",
+    "nuts",
+    "washer",
+    "washers",
+    "stud",
+    "studs",
+    "pin",
+    "pins",
+    "rod",
+    "rods",
+    "spring",
+    "springs",
+    "gear",
+    "gears",
     "завод",
     "компания",
     "ооо",
@@ -40,21 +106,139 @@ GENERIC_LABEL_TOKENS = {
     "детали",
     "деталь",
     "запчасти",
-    "parts",
+    "масло",
+    "масла",
+    "маслосъемный",
+    "маслосъемная",
+    "масл",
+    "жидкость",
+    "жидкости",
+    "подшипник",
+    "подшипники",
+    "колпачок",
+    "колодка",
+    "колодки",
+    "прокладка",
+    "прокладки",
+    "втулка",
+    "втулки",
+    "болт",
+    "болты",
+    "гайка",
+    "гайки",
+    "шайба",
+    "шайбы",
+    "шланг",
+    "шланги",
+    "насос",
+    "насосы",
+    "трубка",
+    "трубки",
+    "кольцо",
+    "кольца",
+    "ремень",
+    "ремни",
+    "уплотнение",
+    "уплотнения",
+    "уплотнитель",
+    "уплотнители",
+    "уплотнительная",
+    "уплотнительные",
+    "уплотнительный",
+    "фильтр",
+    "фильтры",
+    "сальник",
+    "сальники",
+    "клапан",
+    "клапаны",
+    "гидроцилиндр",
+    "цилиндр",
+    "цилиндры",
+    "гидромотор",
+    "поршень",
+    "поршни",
+    "шестерня",
+    "шестерни",
+    "корпус",
+    "кронштейн",
+    "рычаг",
+    "рычаги",
+    "пружина",
+    "деталь",
+    "детали",
+    "запчасть",
+    "кардан",
+    "фара",
+    "лампа",
+    "лампы",
+    "поддон",
+    "насадка",
+    "насадки",
+    "крышка",
+    "крышки",
+    "кожух",
+    "комплект",
+    "комплекты",
+    "опора",
+    "опоры",
+    "распылитель",
+    "распылители",
+    "шкворень",
+    "сайлентблок",
+    "сайлентблоки",
+    "колесо",
+    "колеса",
 }
 NOISE_STARTERS = {
     "замок",
     "прокладка",
+    "прокладки",
     "палец",
+    "пальц",
     "шланг",
+    "шланги",
     "втулка",
+    "втулки",
+    "масло",
     "масла",
     "масел",
+    "маслосъемный",
+    "жидкость",
+    "жидкости",
+    "подшипник",
+    "подшипники",
+    "колпачок",
+    "кольцо",
+    "кольца",
     "насос",
+    "насосы",
     "н/р",
     "для",
     "пружина",
+    "пружины",
     "поршень",
+    "поршни",
+    "ремень",
+    "ремни",
+    "кронштейн",
+    "крышка",
+    "болт",
+    "гайка",
+    "шайба",
+    "фильтр",
+    "фильтры",
+    "уплотнение",
+    "уплотнения",
+    "уплотнитель",
+    "уплотнители",
+    "опора",
+    "опоры",
+    "гидроцилиндр",
+    "гидромотор",
+    "деталь",
+    "детали",
+    "комплект",
+    "комплекты",
 }
 PRE_TRANSLIT_OVERRIDES = {
     "тойота": "toyota",
@@ -152,6 +336,10 @@ RU_TO_LATIN = {
 }
 
 
+def _transliterate_to_latin(text: str) -> str:
+    return "".join(RU_TO_LATIN.get(ch, ch) for ch in text)
+
+
 @dataclass
 class Brand:
     id: str
@@ -191,6 +379,18 @@ def normalize_brand_token(raw: str | None) -> str:
     return token
 
 
+def _build_generic_label_tokens(words: Iterable[str]) -> set[str]:
+    tokens: set[str] = set()
+    for word in words:
+        normalized = normalize_brand_token(word)
+        if normalized:
+            tokens.add(normalized)
+    return tokens
+
+
+GENERIC_LABEL_TOKENS = _build_generic_label_tokens(GENERIC_LABEL_WORDS)
+
+
 def load_manufacturers(path: str | Path = MANUFACTURER_FILE) -> List[str]:
     file_path = ensure_data_file(path, settings.manufacturers_source_url or None)
     lines: List[str] = []
@@ -201,10 +401,6 @@ def load_manufacturers(path: str | Path = MANUFACTURER_FILE) -> List[str]:
                 continue
             lines.append(line)
     return lines
-
-
-def _transliterate_to_latin(text: str) -> str:
-    return "".join(RU_TO_LATIN.get(ch, ch) for ch in text)
 
 
 def _tokenize_text(text: str) -> List[str]:
@@ -432,6 +628,10 @@ def detect_brands_in_query(
     for token in tokens:
         normalized = normalize_brand_token(token)
         if not normalized:
+            continue
+        if normalized in GENERIC_LABEL_TOKENS:
+            non_brand_terms.append(normalized)
+            raw_non_brand_terms.append(token)
             continue
         brand = brand_lookup.get(normalized)
         if not brand:
