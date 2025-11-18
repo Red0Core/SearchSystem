@@ -122,7 +122,7 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
         return base_query
 
     brands: List[str] = classification.get("brands", [])
-    generic_tokens: List[str] = classification.get("non_brand_terms") or classification.get("generic_tokens", [])
+    generic_tokens: List[str] = classification.get("generic_tokens") or classification.get("non_brand_terms") or []
     generic_text = " ".join(generic_tokens).strip()
     brand_catalog = get_brand_catalog()
 

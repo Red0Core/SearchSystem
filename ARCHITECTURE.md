@@ -90,8 +90,8 @@ catalog:
   `transliterate_query` switches between Cyrillic and Latin alphabets for generic
   fuzzy search.
 * `detect_brands_in_query` (from `app/brands.py`) is wired directly into
-  `classify_query`, so every query produces a pair of
-  `(canonical_brand_ids, non_brand_terms)`.
+  `classify_query`, so every query produces canonical brand IDs alongside both
+  normalized and raw non-brand tokens for downstream ranking.
 * `extract_url_tokens` and `is_probable_article_query` detect structured inputs
   (URLs and articles) and pre-normalize them before search.
 * `classify_query` orchestrates the above and emits `QueryClassification`:

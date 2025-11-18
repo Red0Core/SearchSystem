@@ -343,11 +343,14 @@ def extract_brand_ids_from_text(text: str, brand_map: Dict[str, str] | None = No
 def detect_brands_in_query(
     raw_query: str,
     brand_map: Dict[str, str] | None = None,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], List[str]]:
+    """Return detected brand ids, normalized non-brand tokens, and raw tokens."""
+
     brand_lookup = brand_map or get_brand_token_map()
     tokens = _tokenize_text(raw_query or "")
     brands: List[str] = []
     non_brand_terms: List[str] = []
+    raw_non_brand_terms: List[str] = []
     seen = set()
     for token in tokens:
         normalized = normalize_brand_token(token)
@@ -362,4 +365,5 @@ def detect_brands_in_query(
         if len(normalized) < 2 or normalized in QUERY_STOPWORDS:
             continue
         non_brand_terms.append(normalized)
-    return brands, non_brand_terms
+        raw_non_brand_terms.append(token)
+    return brands, non_brand_terms, raw_non_brand_terms

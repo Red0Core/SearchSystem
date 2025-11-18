@@ -157,9 +157,11 @@ def classify_query(q: str) -> QueryClassification:
         return info
 
     brand_map = get_brand_token_map()
-    brand_keys, non_brand_terms = detect_brands_in_query(stripped, brand_map)
+    brand_keys, non_brand_terms, generic_raw_terms = detect_brands_in_query(
+        stripped, brand_map
+    )
     info["brands"] = brand_keys
-    info["generic_tokens"] = non_brand_terms
+    info["generic_tokens"] = generic_raw_terms
     info["non_brand_terms"] = non_brand_terms
 
     if brand_keys:
