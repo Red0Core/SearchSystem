@@ -90,25 +90,6 @@ POST_TRANSLIT_OVERRIDES = {
     "lukoil": "lukoil",
     "lukoyl": "lukoil",
 }
-MAJOR_BRAND_IDS = {"toyota", "lexus", "nissan", "infiniti", "honda", "acura", "lukoil"}
-HARDCODED_BRANDS = {
-    "toyota": {
-        "Toyota",
-        "TOYOTA",
-        "ТОЙОТА",
-        "Toyota Motor Corporation",
-    },
-    "lexus": {
-        "LEXUS",
-        "Lexus",
-        "Лексус",
-    },
-    "lukoil": {
-        "LUKOIL",
-        "ЛУКОЙЛ",
-        "Lukoil",
-    },
-}
 QUERY_STOPWORDS = {
     "the",
     "a",
@@ -278,15 +259,21 @@ def _should_split_hyphen(value: str) -> bool:
         return False
     if value.isupper():
         return True
-    normalized_parts = [normalize_brand_token(item) for item in value.split("-") if item]
-    if len(normalized_parts) < 2:
+    parts = [segment.strip() for segment in value.split("-") if segment.strip()]
+    if len(parts) < 2:
         return False
-    return all(part in MAJOR_BRAND_IDS for part in normalized_parts)
+    normalized_parts = [normalize_brand_token(item) for item in parts]
+    if len([p for p in normalized_parts if p]) < 2:
+        return False
+    # If both sides look like brand-ish tokens (letters and at least 3 chars), split.
+    return all(part.isalpha() and len(part) >= 3 for part in normalized_parts if part)
 
 
 def _tokens_from_label(label: str) -> List[str]:
     tokens: List[str] = []
     for raw_token in _tokenize_text(label):
+        if _looks_like_article_code(raw_token):
+            continue
         normalized = normalize_brand_token(raw_token)
         if not normalized or len(normalized) < 3:
             continue
@@ -294,6 +281,63 @@ def _tokens_from_label(label: str) -> List[str]:
             continue
         tokens.append(normalized)
     return tokens
+
+
+def _damerau_levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    len_a = len(a)
+    len_b = len(b)
+    dist = [[0] * (len_b + 1) for _ in range(len_a + 1)]
+    for i in range(len_a + 1):
+        dist[i][0] = i
+    for j in range(len_b + 1):
+        dist[0][j] = j
+    for i in range(1, len_a + 1):
+        for j in range(1, len_b + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            dist[i][j] = min(
+                dist[i - 1][j] + 1,
+                dist[i][j - 1] + 1,
+                dist[i - 1][j - 1] + cost,
+            )
+            if (
+                i > 1
+                and j > 1
+                and a[i - 1] == b[j - 2]
+                and a[i - 2] == b[j - 1]
+            ):
+                dist[i][j] = min(dist[i][j], dist[i - 2][j - 2] + cost)
+    return dist[len_a][len_b]
+
+
+def _fuzzy_brand_lookup(token: str, brand_lookup: Dict[str, str]) -> str | None:
+    if len(token) < 4:
+        return None
+    best_brand: str | None = None
+    best_score = 0.0
+    for candidate, brand in brand_lookup.items():
+        if candidate == token:
+            return brand
+        if len(candidate) < 4:
+            continue
+        if candidate[0] != token[0]:
+            continue
+        if abs(len(candidate) - len(token)) > 2:
+            continue
+        distance = _damerau_levenshtein(token, candidate)
+        max_len = max(len(candidate), len(token))
+        if distance > 3 or distance > max(1, max_len // 3):
+            continue
+        score = 1 - distance / max_len
+        if score >= 0.6 and score > best_score:
+            best_score = score
+            best_brand = brand
+    return best_brand
 
 
 def _register_brand(label: str, brands: Dict[str, Brand], token_map: Dict[str, str]) -> None:
@@ -318,9 +362,6 @@ def build_brand_catalog(lines: Sequence[str]) -> Tuple[Dict[str, Brand], Dict[st
             continue
         for segment in _split_segments(line):
             _register_brand(segment, brands, token_map)
-    for labels in HARDCODED_BRANDS.values():
-        for label in labels:
-            _register_brand(label, brands, token_map)
     return brands, token_map
 
 
@@ -353,6 +394,11 @@ def get_brand_token_map() -> Dict[str, str]:
     return _brand_by_token
 
 
+def get_normalized_brand_ids() -> List[str]:
+    """Return a sorted list of canonical brand identifiers."""
+    return sorted(get_brand_catalog().keys())
+
+
 def extract_brand_ids_from_text(text: str, brand_map: Dict[str, str] | None = None) -> List[str]:
     brand_lookup = brand_map or get_brand_token_map()
     tokens = _tokenize_text(text or "")
@@ -363,6 +409,8 @@ def extract_brand_ids_from_text(text: str, brand_map: Dict[str, str] | None = No
         if not normalized:
             continue
         brand = brand_lookup.get(normalized)
+        if not brand:
+            brand = _fuzzy_brand_lookup(normalized, brand_lookup)
         if brand and brand not in seen:
             seen.add(brand)
             detected.append(brand)
@@ -386,6 +434,8 @@ def detect_brands_in_query(
         if not normalized:
             continue
         brand = brand_lookup.get(normalized)
+        if not brand:
+            brand = _fuzzy_brand_lookup(normalized, brand_lookup)
         if brand:
             if brand not in seen:
                 seen.add(brand)
