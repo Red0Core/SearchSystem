@@ -59,46 +59,48 @@ response serialization.
    - `search_text_tr` stores a transliterated copy for cross alphabet matches.
    - `product_code_normalized` strips non-alphanumerics and uppercases codes
      for deterministic article lookups.
-   - `manufacturer_normalized` pipes the manufacturer through
-     `normalize_manufacturer`, which tries to resolve brands via the fuzzy
-     dictionary before falling back to a cleaned token.
+   - `manufacturer_brand_tokens` stores the canonical brand IDs detected inside
+     the manufacturer line (e.g., `TOYOTA-LEXUS` → `["toyota", "lexus"]`).
+   - `manufacturer_normalized` reuses the first canonical brand ID so legacy
+     consumers still have a single-string view.
 3. **Indexing**: `index_documents` streams the prepared docs into the
    Elasticsearch `products` index using the bulk helper.
 
 ## Brand knowledge base (`app/brands.py`)
 
-* `load_manufacturers` reads `manufacturer.txt`, ignoring blank/commented
-  lines.
-* `build_brand_index` tokenizes every line, chooses a canonical token, and
-  records all aliases in `canonical_by_variant` / `synonyms_by_canonical`.
-* `_variant_forms` adds transliteration variants in both directions (ru→en and
-  en→ru) so every canonical brand includes Russian, Latin, and mirrored spellings.
-* `find_brand_for_token` tries overrides (e.g., «комз»→`kamaz`), exact
-  matches, and finally a `rapidfuzz` best-match search with score guards,
-  ensuring misspelled tokens still resolve to the intended brand.
-* Helper getters expose canonical brand lists so classifiers and ETL code reuse
-  the same view of the brand universe.
+`app/brands.py` turns the noisy `manufacturer.txt` dump into a structured brand
+catalog:
+
+* Each brand is represented by `Brand(id, labels, tokens)`, where `labels` keep
+  the raw spellings from the file and `tokens` are normalized Latin strings.
+* `_is_noise_line` and `_split_segments` drop article-like prefixes (e.g.,
+  `CA1698373 ...`) and split multi-brand rows (`TOYOTA-LEXUS`).
+* `normalize_brand_token` lowercases, replaces `ё/й`, transliterates Russian
+  characters, strips punctuation, and applies hard-coded typo overrides so
+  «тоёта», «тайота», «leksus», etc. collapse to canonical IDs.
+* `build_brand_catalog` runs all lines through the heuristics above and produces
+  two maps: `brand_id -> Brand` and `token -> brand_id` for O(1) lookups.
+* `extract_brand_ids_from_text` reuses the same tokenizer for manufacturers at
+  index time, and `detect_brands_in_query` performs query-time detection so the
+  classifier and Elasticsearch share a single brand universe.
 
 ## Normalization & classification helpers (`app/utils.py`)
 
-* `normalize_code` and `normalize_manufacturer` derive canonical representations
-  for product codes and manufacturers. The latter tries fuzzy brand detection
-  first, then transliterates, and only then falls back to static synonyms.
-* `transliterate_query` switches between Cyrillic and Latin representations so
-  mixed-alphabet user queries can match either version of a token.
+* `normalize_code` still handles deterministic article normalization, while
+  `transliterate_query` switches between Cyrillic and Latin alphabets for generic
+  fuzzy search.
+* `detect_brands_in_query` (from `app/brands.py`) is wired directly into
+  `classify_query`, so every query produces a pair of
+  `(canonical_brand_ids, non_brand_terms)`.
 * `extract_url_tokens` and `is_probable_article_query` detect structured inputs
   (URLs and articles) and pre-normalize them before search.
-* `detect_brand_tokens` tokenizes queries, generates token variants (raw,
-  normalized, transliterated), and passes them through `find_brand_for_token`.
-  It returns canonical brand IDs and remembers the original token so the search
-  service can preserve the user’s spelling for scoring.
 * `classify_query` orchestrates the above and emits `QueryClassification`:
   - URLs → `QueryKind.URL`
   - Article-like strings → `QueryKind.ARTICLE`
   - Tokens containing only brands → `QueryKind.BRAND_ONLY`
   - Brand + generic tokens → `QueryKind.BRAND_WITH_GENERIC`
   - No brands → `QueryKind.GENERIC_ONLY`
-  The classification also stores `generic_tokens`, normalized codes, and URL
+  The classification also stores `non_brand_terms`, normalized codes, and URL
   tokens for downstream use.
 
 ## Elasticsearch client & index (`app/es_client.py`)
@@ -107,8 +109,9 @@ response serialization.
   - `ru_en_search` analyzer for bilingual stemming/stop words.
   - `brand_phonetic_analyzer` leveraging the phonetic plugin for Double
     Metaphone matches.
-  - Fields for `manufacturer`, `title`, `search_text`, transliteration, and
-    normalized product codes, with phonetic sub-fields where relevant.
+  - Fields for `manufacturer`, `title`, `search_text`, transliteration,
+    normalized product codes, and the new `manufacturer_brand_tokens` keyword
+    array used for filtering/boosting.
 * `search_es` runs the constructed query body, while `get_client` lazily
   configures the `Elasticsearch` instance against the configured host.
 
@@ -131,11 +134,12 @@ The `search_products` function coordinates the full request lifecycle:
    `track_total_hits=false` and field-specific logic:
    - Article queries prioritize `product_code_normalized` and `title`.
    - URL queries run `multi_match` over `search_text` and transliterated text.
-   - Brand-only queries filter on `manufacturer_normalized`, add boosted
-     `manufacturer`/phonetic matches, and treat the raw brand string as a soft
-     ranking hint.
-   - Brand+generic queries add both the brand filter and a boosted generic
-     `multi_match` clause so parts like «ступица» influence ranking.
+   - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
+     `constant_score` clause for those canonical IDs, and then use the brand
+     labels to rank within the filtered set.
+   - Brand+generic queries keep the full corpus but add a strong brand boost so
+     matching manufacturers appear first while `non_brand_terms` drive the main
+     `multi_match` clause.
    - Generic queries fall back to a standard fuzzy `multi_match` over
      `title`, `search_text`, and `product_code`.
    Transliteration matches optionally add phonetic should-clauses to catch

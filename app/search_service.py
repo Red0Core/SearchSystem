@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 from time import perf_counter
-from typing import Dict, List, Set
+from typing import Dict, List
 
-from .brands import get_synonyms_for_brand
+from .brands import get_brand_catalog
 from .cache import get_cache
 from .config import settings
 from .es_client import search_es
@@ -122,49 +122,60 @@ def build_es_query(raw_query: str, classification: QueryClassification) -> dict:
         return base_query
 
     brands: List[str] = classification.get("brands", [])
-    brand_originals: Dict[str, str] = classification.get("brand_originals", {})
-    generic_tokens: List[str] = classification.get("generic_tokens", [])
+    generic_tokens: List[str] = classification.get("non_brand_terms") or classification.get("generic_tokens", [])
     generic_text = " ".join(generic_tokens).strip()
-    brand_focus = " ".join(brand_originals.values()).strip() or query_text
+    brand_catalog = get_brand_catalog()
 
-    def brand_filter_values() -> List[str]:
-        values: Set[str] = set()
+    def focus_label() -> str:
+        focus: List[str] = []
         for brand in brands:
-            values.add(brand)
-            values.update(get_synonyms_for_brand(brand))
-        return [value for value in values if value]
+            record = brand_catalog.get(brand)
+            if record and record.labels:
+                focus.append(sorted(record.labels)[0])
+            else:
+                focus.append(brand)
+        return " ".join(focus).strip()
+
+    brand_focus = focus_label() or query_text
 
     def apply_brand_filter() -> None:
-        filter_terms = brand_filter_values()
-        if filter_terms:
-            add_filter({"terms": {"manufacturer_normalized": filter_terms}})
+        if brands:
+            add_filter({"terms": {"manufacturer_brand_tokens": brands}})
 
-    def add_brand_should(boost: float = 2.0) -> None:
-        if not brand_focus:
+    def add_brand_boost(boost: float = 4.0) -> None:
+        if not brands:
             return
         add_should(
             {
-                "multi_match": {
-                    "query": brand_focus,
-                    "fields": ["manufacturer^3", "manufacturer.phonetic^2"],
-                    "type": "most_fields",
-                    "fuzziness": "AUTO",
+                "constant_score": {
+                    "filter": {"terms": {"manufacturer_brand_tokens": brands}},
                     "boost": boost,
                 }
             }
         )
+        if brand_focus:
+            add_should(
+                {
+                    "multi_match": {
+                        "query": brand_focus,
+                        "fields": ["manufacturer^4", "manufacturer.phonetic^2"],
+                        "type": "most_fields",
+                        "boost": max(1.5, boost / 2),
+                    }
+                }
+            )
 
     if kind == QueryKind.BRAND_ONLY:
         apply_brand_filter()
-        add_brand_should(boost=2.5)
+        add_brand_boost(boost=4.0)
         add_text_match(query_text, boost=0.8, fields=["title^2", "search_text"], clause="should")
+        bool_clause["minimum_should_match"] = 1
     elif kind == QueryKind.BRAND_WITH_GENERIC:
-        apply_brand_filter()
         if generic_text:
-            add_text_match(generic_text, boost=1.2)
+            add_text_match(generic_text, boost=1.3)
         else:
             add_text_match(query_text, boost=1.0)
-        add_brand_should(boost=2.0)
+        add_brand_boost(boost=5.0)
     elif kind in (QueryKind.GENERIC_ONLY, QueryKind.UNKNOWN):
         add_text_match(query_text, boost=1.0)
     else:
