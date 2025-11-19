@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections import defaultdict
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 from .config import settings
@@ -189,6 +190,47 @@ GENERIC_LABEL_WORDS = {
     "колесо",
     "колеса",
 }
+
+GENERIC_SUFFIXES = [
+    "ami",
+    "yami",
+    "kami",
+    "yah",
+    "akh",
+    "ogo",
+    "ego",
+    "omu",
+    "emu",
+    "ami",
+    "yakh",
+    "akh",
+    "ov",
+    "ev",
+    "iy",
+    "yy",
+    "iyu",
+    "uyu",
+    "aya",
+    "oy",
+    "ey",
+    "iy",
+    "im",
+    "ym",
+    "om",
+    "em",
+    "am",
+    "yam",
+    "iu",
+    "ya",
+    "ia",
+    "a",
+    "y",
+    "i",
+    "u",
+    "e",
+    "s",
+    "es",
+]
 NOISE_STARTERS = {
     "замок",
     "прокладка",
@@ -347,6 +389,33 @@ class Brand:
     tokens: set[str] = field(default_factory=set)
 
 
+@dataclass
+class LabelCandidate:
+    text: str
+    tokens: List[str]
+    is_upper: bool
+    has_latin: bool
+    token_count: int
+    hyphenated: bool
+
+
+@dataclass
+class TokenStats:
+    occurrences: int = 0
+    solo_occurrences: int = 0
+    uppercase_occurrences: int = 0
+    latin_occurrences: int = 0
+    hyphen_occurrences: int = 0
+
+    def score(self) -> float:
+        return (
+            self.solo_occurrences * 2
+            + self.uppercase_occurrences
+            + self.hyphen_occurrences
+            + self.latin_occurrences * 0.5
+        )
+
+
 _brand_catalog: Dict[str, Brand] = {}
 _brand_by_token: Dict[str, str] = {}
 
@@ -379,16 +448,47 @@ def normalize_brand_token(raw: str | None) -> str:
     return token
 
 
+def _strip_generic_suffix(token: str) -> str:
+    if not token:
+        return ""
+    base = token
+    changed = True
+    while changed:
+        changed = False
+        for suffix in GENERIC_SUFFIXES:
+            if base.endswith(suffix) and len(base) - len(suffix) >= 4:
+                base = base[: -len(suffix)]
+                changed = True
+                break
+    return base
+
+
 def _build_generic_label_tokens(words: Iterable[str]) -> set[str]:
     tokens: set[str] = set()
     for word in words:
         normalized = normalize_brand_token(word)
-        if normalized:
-            tokens.add(normalized)
-    return tokens
+        if not normalized:
+            continue
+        tokens.add(normalized)
+        tokens.add(_strip_generic_suffix(normalized))
+    return {token for token in tokens if token}
 
 
 GENERIC_LABEL_TOKENS = _build_generic_label_tokens(GENERIC_LABEL_WORDS)
+GENERIC_TOKEN_BASES = {
+    token for token in (_strip_generic_suffix(item) for item in GENERIC_LABEL_TOKENS) if token
+}
+
+
+def _is_generic_like_token(token: str) -> bool:
+    if not token:
+        return True
+    if token in GENERIC_LABEL_TOKENS:
+        return True
+    base = _strip_generic_suffix(token)
+    if base in GENERIC_TOKEN_BASES:
+        return True
+    return False
 
 
 def load_manufacturers(path: str | Path = MANUFACTURER_FILE) -> List[str]:
@@ -405,6 +505,17 @@ def load_manufacturers(path: str | Path = MANUFACTURER_FILE) -> List[str]:
 
 def _tokenize_text(text: str) -> List[str]:
     return TOKEN_PATTERN.findall(text or "")
+
+
+def _looks_all_caps(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    return all(ch.isupper() for ch in letters)
+
+
+def _contains_latin(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", text))
 
 
 def _looks_like_article_code(token: str) -> bool:
@@ -473,7 +584,7 @@ def _tokens_from_label(label: str) -> List[str]:
         normalized = normalize_brand_token(raw_token)
         if not normalized or len(normalized) < 3:
             continue
-        if normalized in GENERIC_LABEL_TOKENS:
+        if _is_generic_like_token(normalized):
             continue
         tokens.append(normalized)
     return tokens
@@ -536,14 +647,71 @@ def _fuzzy_brand_lookup(token: str, brand_lookup: Dict[str, str]) -> str | None:
     return best_brand
 
 
-def _register_brand(label: str, brands: Dict[str, Brand], token_map: Dict[str, str]) -> None:
-    tokens = _tokens_from_label(label)
-    if not tokens:
+def _collect_candidates(lines: Sequence[str]) -> Tuple[List[LabelCandidate], Dict[str, TokenStats]]:
+    candidates: List[LabelCandidate] = []
+    stats: Dict[str, TokenStats] = defaultdict(TokenStats)
+    for line in lines:
+        if _is_noise_line(line):
+            continue
+        for segment in _split_segments(line):
+            tokens = _tokens_from_label(segment)
+            if not tokens:
+                continue
+            candidate = LabelCandidate(
+                text=segment.strip(),
+                tokens=tokens,
+                is_upper=_looks_all_caps(segment),
+                has_latin=_contains_latin(segment),
+                token_count=len(tokens),
+                hyphenated="-" in segment,
+            )
+            candidates.append(candidate)
+            for token in tokens:
+                stat = stats[token]
+                stat.occurrences += 1
+                if candidate.token_count == 1:
+                    stat.solo_occurrences += 1
+                if candidate.is_upper:
+                    stat.uppercase_occurrences += 1
+                if candidate.has_latin or _contains_latin(token):
+                    stat.latin_occurrences += 1
+                if candidate.hyphenated:
+                    stat.hyphen_occurrences += 1
+    return candidates, stats
+
+
+def _select_trusted_tokens(stats: Dict[str, TokenStats]) -> set[str]:
+    trusted: set[str] = set()
+    for token, stat in stats.items():
+        if not token:
+            continue
+        if _is_generic_like_token(token):
+            continue
+        if stat.solo_occurrences:
+            trusted.add(token)
+            continue
+        if stat.occurrences <= 2 and (stat.uppercase_occurrences or stat.latin_occurrences):
+            trusted.add(token)
+            continue
+        if stat.score() >= 2.5:
+            trusted.add(token)
+    return trusted
+
+
+def _register_candidate(
+    candidate: LabelCandidate,
+    trusted_tokens: set[str],
+    brands: Dict[str, Brand],
+    token_map: Dict[str, str],
+) -> None:
+    canonical = next((token for token in candidate.tokens if token in trusted_tokens), None)
+    if not canonical:
         return
-    canonical = tokens[0]
     brand = brands.setdefault(canonical, Brand(id=canonical))
-    brand.labels.add(label.strip())
-    for token in tokens:
+    brand.labels.add(candidate.text)
+    for token in candidate.tokens:
+        if token not in trusted_tokens:
+            continue
         brand.tokens.add(token)
         token_map.setdefault(token, canonical)
     brand.tokens.add(canonical)
@@ -551,13 +719,12 @@ def _register_brand(label: str, brands: Dict[str, Brand], token_map: Dict[str, s
 
 
 def build_brand_catalog(lines: Sequence[str]) -> Tuple[Dict[str, Brand], Dict[str, str]]:
+    candidates, stats = _collect_candidates(lines)
+    trusted = _select_trusted_tokens(stats)
     brands: Dict[str, Brand] = {}
     token_map: Dict[str, str] = {}
-    for line in lines:
-        if _is_noise_line(line):
-            continue
-        for segment in _split_segments(line):
-            _register_brand(segment, brands, token_map)
+    for candidate in candidates:
+        _register_candidate(candidate, trusted, brands, token_map)
     return brands, token_map
 
 
@@ -629,7 +796,7 @@ def detect_brands_in_query(
         normalized = normalize_brand_token(token)
         if not normalized:
             continue
-        if normalized in GENERIC_LABEL_TOKENS:
+        if _is_generic_like_token(normalized):
             non_brand_terms.append(normalized)
             raw_non_brand_terms.append(token)
             continue

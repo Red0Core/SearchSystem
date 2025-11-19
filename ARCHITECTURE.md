@@ -76,10 +76,17 @@ catalog:
 * `_is_noise_line` and `_split_segments` drop article-like prefixes (e.g.,
   `CA1698373 ...`) and split multi-brand rows (`TOYOTA-LEXUS`).
 * `normalize_brand_token` lowercases, replaces `ё/й`, transliterates Russian
-  characters, strips punctuation, and applies hard-coded typo overrides so
-  «тоёта», «тайота», «leksus», etc. collapse to canonical IDs.
-* `build_brand_catalog` runs all lines through the heuristics above and produces
-  two maps: `brand_id -> Brand` and `token -> brand_id` for O(1) lookups.
+  characters, strips punctuation, and applies typo overrides so «тоёта»,
+  «тайота», «leksus», etc. collapse to canonical IDs.
+* Brand parsing is now two-phased: `_collect_candidates` gathers every clean
+  manufacturer label, tokenizes it, and tracks statistics (solo occurrences,
+  uppercase frequency, hyphenated usage, etc.) for each normalized token. The
+  `_select_trusted_tokens` scorer keeps only those tokens that look like proper
+  names (appear solo, in uppercase lines, or repeatedly in multi-brand combos)
+  while aggressively discarding nouns such as «масло», «жидкость», «подшипник».
+* `build_brand_catalog` then registers each candidate whose tokens intersect
+  the trusted set, producing two maps: `brand_id -> Brand` and
+  `token -> brand_id` for O(1) lookups.
 * `extract_brand_ids_from_text` reuses the same tokenizer for manufacturers at
   index time, and `detect_brands_in_query` performs query-time detection so the
   classifier and Elasticsearch share a single brand universe.
