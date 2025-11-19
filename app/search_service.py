@@ -130,15 +130,25 @@ def build_es_query(
     generic_tokens: List[str] = classification.get("generic_tokens") or classification.get("non_brand_terms") or []
     generic_text = " ".join(generic_tokens).strip()
     brand_catalog = get_brand_catalog()
+    brand_tokens = classification.get("brand_tokens", []) or []
 
     def focus_label() -> str:
         focus: List[str] = []
+        seen: set[str] = set()
+        for token in brand_tokens:
+            candidate = token.strip()
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                focus.append(candidate)
         for brand in brands:
             record = brand_catalog.get(brand)
             if record and record.labels:
-                focus.append(sorted(record.labels)[0])
+                candidate = sorted(record.labels)[0]
             else:
-                focus.append(brand)
+                candidate = brand
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                focus.append(candidate)
         return " ".join(focus).strip()
 
     brand_focus = focus_label() or query_text

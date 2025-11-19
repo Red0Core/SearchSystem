@@ -30,6 +30,7 @@ class QueryClassification(TypedDict, total=False):
     query: str
     tokens: List[str]
     brands: List[str]
+    brand_tokens: List[str]
     generic_tokens: List[str]
     non_brand_terms: List[str]
     normalized_code: str
@@ -157,12 +158,13 @@ def classify_query(q: str) -> QueryClassification:
         return info
 
     brand_map = get_brand_token_map()
-    brand_keys, non_brand_terms, generic_raw_terms = detect_brands_in_query(
+    brand_keys, non_brand_terms, generic_raw_terms, brand_raw_terms = detect_brands_in_query(
         stripped, brand_map
     )
     info["brands"] = brand_keys
     info["generic_tokens"] = generic_raw_terms
     info["non_brand_terms"] = non_brand_terms
+    info["brand_tokens"] = brand_raw_terms
 
     if brand_keys:
         if non_brand_terms:
