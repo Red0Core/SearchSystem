@@ -645,7 +645,9 @@ def _tokens_from_label(label: str) -> List[str]:
         if _looks_like_article_code(raw_token):
             continue
         normalized = normalize_brand_token(raw_token)
-        if not normalized or len(normalized) < 3:
+        # Keep two-character brands like "zf" or "3m" while still ignoring
+        # extremely short/ambiguous one-letter tokens.
+        if not normalized or len(normalized) < 2:
             continue
         if _is_generic_like_token(normalized):
             continue
