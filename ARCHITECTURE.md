@@ -77,7 +77,8 @@ catalog:
   `CA1698373 ...`) and split multi-brand rows (`TOYOTA-LEXUS`).
 * `normalize_brand_token` lowercases, replaces `ё/й`, transliterates Russian
   characters, strips punctuation, and applies typo overrides so «тоёта»,
-  «тайота», «leksus», etc. collapse to canonical IDs.
+  «тайота», «leksus», «кэт», «caterpilar» all collapse to canonical IDs such as
+  `toyota`, `lexus`, or `caterpillar`.
 * Brand parsing is two-phased: `_collect_candidates` gathers every clean
   manufacturer label, tokenizes it, and tracks detailed statistics (solo
   occurrences, uppercase frequency, hyphen usage, plus whether the original
@@ -92,6 +93,20 @@ catalog:
   index time, skips the generic nouns before fuzzy matching, and
   `detect_brands_in_query` performs query-time detection so the classifier and
   Elasticsearch share a single brand universe.
+
+### Lifecycle summary
+
+1. **Startup** — `load_brand_catalog` parses `manufacturer.txt`, persists the
+   resulting dictionaries in memory, and exposes helper accessors.
+2. **Index time** — `extract_brand_ids_from_text` is called from the ETL loader
+   for each manufacturer string so documents store `manufacturer_brand_tokens`.
+3. **Query time** — `detect_brands_in_query` tokenizes the user input, applies
+   deterministic overrides (Toyota/Lexus/Lukoil/Caterpillar/etc.), optionally
+   triggers Damerau–Levenshtein matching against the canonical token list, and
+   emits both canonical ids and untouched generic tokens (for Cyrillic search).
+4. **Logging** — `app.utils` logs the classification decision with the detected
+   brand ids and the tokens that were treated as generic, making it easy to
+   diagnose missed matches.
 
 ## Normalization & classification helpers (`app/utils.py`)
 
@@ -137,33 +152,39 @@ The `search_products` function coordinates the full request lifecycle:
 
 1. **Cache lookup**: the SHA-256 hash of the raw query becomes the cache key.
    Cache hits short-circuit the remaining steps and log a cheap timing entry.
-2. **Classification**: `classify_query` identifies URLs, articles, and brand
-   intent.
+2. **Classification**: `classify_query` identifies URLs, articles, brand intent,
+   and stores `raw_generic_tokens` (unmodified alphabet) alongside normalized
+   ones so Elasticsearch clauses can stay bilingual.
 3. **Query building** (`build_es_query`): constructs a bool query with
-   `track_total_hits=false` and field-specific logic:
+   `track_total_hits=false`, constant field lists, and helper builders for each
+   branch:
    - Article queries prioritize `product_code_normalized` and `title`.
    - URL queries run `multi_match` over `search_text` and transliterated text.
-  - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
-    `constant_score` clause for those canonical IDs, and then use the brand
-    labels to rank within the filtered set; if the filter returns zero hits the
-    service automatically retries without the filter so the user still sees
-    something useful.
-  - Brand+generic queries first run with the same brand filter to guarantee
-    brand-first ordering, but fall back to a boosted, filter-less query if the
-    brand inventory is empty so mixed queries never return blank pages.
+   - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
+     `constant_score` clause for those canonical IDs, and then use the brand
+     labels to rank within the filtered set; if the filter returns zero hits the
+     service automatically retries without the filter so the user still sees
+     something useful.
+   - Brand+generic queries first run with the same brand filter to guarantee
+     brand-first ordering; `raw_generic_tokens` are joined as-is, and
+     transliterated tokens are only used when no Cyrillic text is available. If
+     the brand inventory is empty the service rebuilds the query without the
+     filter but keeps brand boosts so the intended manufacturers stay on top.
    - Generic queries fall back to a standard fuzzy `multi_match` over
-     `title`, `search_text`, and `product_code`.
-   Transliteration matches optionally add phonetic should-clauses to catch
-   mismatched alphabets.
-4. **Execution & serialization**: results from Elasticsearch are trimmed to the
-   `_source` fields, converted into lightweight dicts, and stored with the
-   measured `took_ms` and overall `eta_ms`. A deeper dive into the scoring stack
-   (multi-match boosts, brand filters, constant-score clauses, phonetics, and the
-   fallback plan) now lives in `SCORING_AND_SEARCH.md`.
-5. **Timing logs**: every stage (classification, query building, ES call,
+     `title`, `search_text`, and `product_code` plus phonetic should-clauses to
+     catch transliterated mismatches.
+4. **Execution & fallback**: Elasticsearch is called once. If the brand filter
+   returned too few documents (`settings.brand_fallback_min_hits`),
+   `search_products` immediately rebuilds and reruns the query without the
+   filter, logging `brand_fallback=1` for observability.
+5. **Serialization**: results from Elasticsearch are trimmed to the `_source`
+   fields, converted into lightweight dicts, and stored with the measured
+   `took_ms` and overall `eta_ms`. `SCORING_AND_SEARCH.md` dives into the exact
+   boosts, fuzziness, and phonetic weights.
+6. **Timing logs**: every stage (classification, query building, ES call,
    post-processing) is timed with `perf_counter()` and logged, which makes it
    easy to spot SLA regressions.
-6. **Caching**: fresh responses are cached for `settings.cache_ttl_seconds`
+7. **Caching**: fresh responses are cached for `settings.cache_ttl_seconds`
    (default 5 minutes), keeping hot queries under a millisecond after the first
    hit.
 
@@ -245,21 +266,39 @@ brand filter and therefore return identical inventories.
   инициализация зависимостей.
 * **Бренды (`app/brands.py`)** — чтение `manufacturer.txt`, очистка строк от
   артикулов/описаний, нормализация токенов (латиница + транслитерация, замена
-  «ё/й», словари опечаток), статистика по каждому токену (отдельные
-  вхождения, верхний регистр, латиница/кириллица, наличие дефиса) и отбор
-  канонических идентификаторов. Генерируется две структуры: описание бренда и
-  карта «токен → canonical id».
+  «ё/й», словари опечаток для Toyota/Lexus/Lukoil/Caterpillar и т. д.). Для
+  каждого токена собирается статистика (сколько раз встречался в одиночку,
+  какой регистр, есть ли дефис, какая раскладка) и принимается решение,
+  относить ли его к брендам или к описательным словам. На выходе получаем
+  структуру `Brand` (canonical id + исходные лейблы) и карту «токен → id».
 * **ETL (`app/etl_loader.py`)** — подготавливает документы для Elasticsearch:
   `search_text`, `search_text_tr`, нормализованные артикулы и массив
   `manufacturer_brand_tokens` для жёсткого фильтра.
 * **Поиск (`app/search_service.py`)** — кэш, классификация (`classify_query`),
-  сборка DSL, вызов Elasticsearch, повтор без фильтра (fallback) и логирование
-  метрик. Подробности про скоуп запросов и `_score` описаны в
+  хранение «сырых» generic-слов (например, «масло» в кириллице), сборка DSL,
+  вызов Elasticsearch, повтор без фильтра (fallback) и логирование метрик.
+  Подробности про скоуп запросов и `_score` описаны в
   `SCORING_AND_SEARCH.md`.
 * **Кэш (`app/cache.py`)** — Redis или in-memory обёртка с TTL.
 * **Elasticsearch (`app/es_client.py`)** — индекс `products` с анализаторами
   `ru_en_search` и `brand_phonetic`, а также полями `search_text_tr` и
   `manufacturer_brand_tokens`.
+
+## Жизненный цикл бренда
+
+1. **Старт** — `load_brand_catalog` разбирает весь `manufacturer.txt`, фильтрует
+   строки по паттернам артикулов, дробит `TOYOTA-LEXUS`, анализирует каждый
+   токен и сохраняет два словаря: `brands` и `token → brand id`.
+2. **Индексирование** — `extract_brand_ids_from_text` вызывается для каждого
+   производителя в `offers.json`. Туда попадают только «доверенные» токены;
+   остальные слова (масло, жидкость, город, ...) отбрасываются. Результат
+   записывается в `manufacturer_brand_tokens`.
+3. **Запросы** — `detect_brands_in_query` проходит по каждому слову запроса,
+   применяет те же правила нормализации/транслитерации, использует ограниченный
+   Damerau–Levenshtein для опечаток и возвращает canonical ids + списки generic
+   слов (в исходной и нормализованной форме).
+4. **Логи** — каждая классификация логирует `kind`, `brands`, `non_brand_terms`,
+   что облегчает отладку пропущенных брендов.
 
 ## Обработка запроса
 
@@ -268,16 +307,19 @@ brand filter and therefore return identical inventories.
    бренд, бренд + дополнительные слова или generic.
 3. В зависимости от класса собирается `bool`-запрос:
    * чистый бренд → `filter` по `manufacturer_brand_tokens` + `constant_score`
-     буст + ранжирование по `manufacturer`/`title`;
-   * бренд + описательные слова → тот же фильтр + `must` по non-brand термам;
-     если документов мало, выполняется повтор без фильтра, но с большим
-     `should`-бустом бренда;
-   * generic → `multi_match` по `title`, `search_text`, `product_code` и
-     дополнительный phonetic should для транслитерации;
-   * статьи и URL имеют свои ветки.
-4. Ответ сериализуется (id, manufacturer, product_code, title, score) и
-   кэшируется. Логируются времена классификации, сборки, вызова ES и постобработки
-   — SLA держим < 200 мс.
+     буст + `multi_match` по `manufacturer/title`. Если индекс пуст по бренду,
+     выполняется fallback без фильтра.
+   * бренд + описательные слова → тот же фильтр + `must` по raw generic словам
+     (в оригинальной раскладке). При нехватке документов — повтор без фильтра,
+     но с мощным `should`-бустом бренда.
+   * generic → `multi_match` по `title`, `search_text`, `product_code`, плюс
+     phonetic `should` для транслитерации.
+   * статьи и URL имеют свои ветки (`term` по `product_code_normalized` или
+     расширенный `multi_match` по `search_text*`).
+4. Ответ сериализуется (id, manufacturer, product_code, title, score, timings)
+   и кэшируется. Логируются времена классификации, сборки, вызова ES и
+   постобработки — SLA держим < 200 мс. Вся детализация по полям и бустам
+   приведена в `SCORING_AND_SEARCH.md`.
 
 ## Где смотреть детали
 

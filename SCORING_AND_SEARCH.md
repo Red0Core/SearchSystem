@@ -107,3 +107,71 @@ followed by a Russian mirror.
 * **Elasticsearch** — цель <150 мс даже с повторным запросом.
 * **Постобработка** — <1 мс.
 * **Кэш** — попавший в кэш запрос укладывается в миллисекунду.
+
+## 4. Field & analyzer reference (EN)
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `manufacturer` | `text` + `phonetic` subfield | Brand names + phonetic matching |
+| `manufacturer_brand_tokens` | `keyword[]` | Canonical brand IDs for filters/boosts |
+| `title` | `text` + `phonetic` | Primary descriptive text |
+| `search_text` | `text` | Concatenation of manufacturer/title/product code |
+| `search_text_tr` | `text` | Transliteration of `search_text` for cross-alphabet matches |
+| `product_code` | `text` | Raw article for display |
+| `product_code_normalized` | `keyword` | Analyzer-free article to support exact matches |
+
+Analyzers:
+
+* `ru_en_search` — custom analyzer with Russian + English stop-words/stemmers,
+  used by `manufacturer`, `title`, and `search_text`.
+* `brand_phonetic_analyzer` — Elasticsearch phonetic plugin (Double Metaphone),
+  exposed via `.phonetic` subfields to bridge латиница ↔ кириллица.
+* `keyword` — no analysis; used for filters and deterministic lookups.
+
+## 4. Справочник полей и анализаторов (RU)
+
+| Поле | Тип | Назначение |
+| --- | --- | --- |
+| `manufacturer` | `text` + `phonetic` | Названия брендов + фонетика |
+| `manufacturer_brand_tokens` | `keyword[]` | Канонические id брендов для фильтра/бустов |
+| `title` | `text` + `phonetic` | Основное описание товара |
+| `search_text` | `text` | Склейка manufacturer/title/product_code |
+| `search_text_tr` | `text` | Транслитерированная версия `search_text` |
+| `product_code` | `text` | Исходный артикул для отображения |
+| `product_code_normalized` | `keyword` | Очищенный артикул для точного поиска |
+
+Анализаторы:
+
+* `ru_en_search` — общий анализатор с русским/английским стеммингом.
+* `brand_phonetic_analyzer` — Double Metaphone, используется в `.phonetic`.
+* `keyword` — без анализа, идеально для `terms`/`filter`.
+
+## 5. Example walkthrough (EN)
+
+1. User types `"масло лукойл"`.
+2. `classify_query` detects canonical brand `lukoil`, captures raw generic token
+   `"масло"`, and emits `QueryKind.BRAND_WITH_GENERIC`.
+3. `build_es_query` builds a bool query with:
+   * `filter`: `manufacturer_brand_tokens` in `["lukoil"]`.
+   * `must`: `multi_match` over `title^3`, `manufacturer`, `search_text` with
+     `query="масло"`.
+   * `should`: constant-score boost for `lukoil` (value 5).
+4. ES executes the request. If no hits are returned, `search_products` reruns the
+   query without the `filter`, but keeps the brand boost so Lukoil documents still
+   outrank others.
+5. Response: list of hits (id/manufacturer/title/product_code), `_score`,
+   `brand_fallback=0/1`, timings, and the classification metadata for debugging.
+
+## 5. Пример шага за шагом (RU)
+
+1. Пользователь вводит «масло лукойл».
+2. `classify_query` находит бренд `lukoil`, сохраняет исходное слово «масло» и
+   выбирает `QueryKind.BRAND_WITH_GENERIC`.
+3. `build_es_query` строит `bool`:
+   * `filter`: `manufacturer_brand_tokens` содержит `lukoil`.
+   * `must`: `multi_match` по `title^3`/`manufacturer`/`search_text` с запросом
+     «масло».
+   * `should`: `constant_score` c boost=5 для `lukoil`.
+4. Если документов нет, `search_products` повторяет запрос без `filter`, но с тем
+   же `should` — брендовые документы всё равно оказываются первыми.
+5. Клиент получает результаты с `_score`, таймингами и пометкой `brand_fallback`.
