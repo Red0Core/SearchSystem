@@ -78,12 +78,13 @@ catalog:
 * `normalize_brand_token` lowercases, replaces `ё/й`, transliterates Russian
   characters, strips punctuation, and applies typo overrides so «тоёта»,
   «тайота», «leksus», etc. collapse to canonical IDs.
-* Brand parsing is now two-phased: `_collect_candidates` gathers every clean
-  manufacturer label, tokenizes it, and tracks statistics (solo occurrences,
-  uppercase frequency, hyphenated usage, etc.) for each normalized token. The
-  `_select_trusted_tokens` scorer keeps only those tokens that look like proper
-  names (appear solo, in uppercase lines, or repeatedly in multi-brand combos)
-  while aggressively discarding nouns such as «масло», «жидкость», «подшипник».
+* Brand parsing is two-phased: `_collect_candidates` gathers every clean
+  manufacturer label, tokenizes it, and tracks detailed statistics (solo
+  occurrences, uppercase frequency, hyphen usage, plus whether the original
+  label used Cyrillic or Latin letters). `_select_trusted_tokens` combines those
+  stats with an expanded vocabulary of known generic nouns (масло, жидкость,
+  блок, пыльник, …) to drop descriptive tokens and keep only things that behave
+  like proper names.
 * `build_brand_catalog` then registers each candidate whose tokens intersect
   the trusted set, producing two maps: `brand_id -> Brand` and
   `token -> brand_id` for O(1) lookups.
@@ -156,7 +157,9 @@ The `search_products` function coordinates the full request lifecycle:
    mismatched alphabets.
 4. **Execution & serialization**: results from Elasticsearch are trimmed to the
    `_source` fields, converted into lightweight dicts, and stored with the
-   measured `took_ms` and overall `eta_ms`.
+   measured `took_ms` and overall `eta_ms`. A deeper dive into the scoring stack
+   (multi-match boosts, brand filters, constant-score clauses, phonetics, and the
+   fallback plan) now lives in `SCORING_AND_SEARCH.md`.
 5. **Timing logs**: every stage (classification, query building, ES call,
    post-processing) is timed with `perf_counter()` and logged, which makes it
    easy to spot SLA regressions.
@@ -229,3 +232,55 @@ brand filter and therefore return identical inventories.
   CLI already deserialize the same schema.
 * Add new query types by extending `QueryKind` and branching inside
   `classify_query` and `build_es_query`.
+
+---
+
+# Архитектура системы (RU)
+
+Эта секция дублирует основные мысли документа на русском языке.
+
+## Слои
+
+* **FastAPI (`app/main.py`)** — маршруты `/search`, `/health`, `/reindex` и
+  инициализация зависимостей.
+* **Бренды (`app/brands.py`)** — чтение `manufacturer.txt`, очистка строк от
+  артикулов/описаний, нормализация токенов (латиница + транслитерация, замена
+  «ё/й», словари опечаток), статистика по каждому токену (отдельные
+  вхождения, верхний регистр, латиница/кириллица, наличие дефиса) и отбор
+  канонических идентификаторов. Генерируется две структуры: описание бренда и
+  карта «токен → canonical id».
+* **ETL (`app/etl_loader.py`)** — подготавливает документы для Elasticsearch:
+  `search_text`, `search_text_tr`, нормализованные артикулы и массив
+  `manufacturer_brand_tokens` для жёсткого фильтра.
+* **Поиск (`app/search_service.py`)** — кэш, классификация (`classify_query`),
+  сборка DSL, вызов Elasticsearch, повтор без фильтра (fallback) и логирование
+  метрик. Подробности про скоуп запросов и `_score` описаны в
+  `SCORING_AND_SEARCH.md`.
+* **Кэш (`app/cache.py`)** — Redis или in-memory обёртка с TTL.
+* **Elasticsearch (`app/es_client.py`)** — индекс `products` с анализаторами
+  `ru_en_search` и `brand_phonetic`, а также полями `search_text_tr` и
+  `manufacturer_brand_tokens`.
+
+## Обработка запроса
+
+1. Клиент вызывает `/search?q=...`.
+2. `search_products` проверяет кэш и классифицирует запрос: URL, артикул, чистый
+   бренд, бренд + дополнительные слова или generic.
+3. В зависимости от класса собирается `bool`-запрос:
+   * чистый бренд → `filter` по `manufacturer_brand_tokens` + `constant_score`
+     буст + ранжирование по `manufacturer`/`title`;
+   * бренд + описательные слова → тот же фильтр + `must` по non-brand термам;
+     если документов мало, выполняется повтор без фильтра, но с большим
+     `should`-бустом бренда;
+   * generic → `multi_match` по `title`, `search_text`, `product_code` и
+     дополнительный phonetic should для транслитерации;
+   * статьи и URL имеют свои ветки.
+4. Ответ сериализуется (id, manufacturer, product_code, title, score) и
+   кэшируется. Логируются времена классификации, сборки, вызова ES и постобработки
+   — SLA держим < 200 мс.
+
+## Где смотреть детали
+
+* `ARCHITECTURE.md` (этот файл) — структура приложения и точки расширения.
+* `SCORING_AND_SEARCH.md` — формулы для `_score`, порядок выполнения запросов,
+  объяснение fallback-логики.

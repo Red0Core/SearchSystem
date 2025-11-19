@@ -217,6 +217,9 @@ GENERIC_LABEL_WORDS = {
     "кожух",
     "комплект",
     "комплекты",
+    "пыльник",
+    "пыльники",
+    "pylnik",
     "опора",
     "опоры",
     "распылитель",
@@ -226,6 +229,12 @@ GENERIC_LABEL_WORDS = {
     "сайлентблоки",
     "колесо",
     "колеса",
+    "блок",
+    "blok",
+    "выпускной",
+    "выпускного",
+    "vypusknoy",
+    "vypusknogo",
     "quanzhou",
     "shanghai",
     "moscow",
@@ -331,6 +340,9 @@ NOISE_STARTERS = {
     "детали",
     "комплект",
     "комплекты",
+    "пыльник",
+    "пыльники",
+    "pylnik",
 }
 PRE_TRANSLIT_OVERRIDES = {
     "тойота": "toyota",
@@ -455,6 +467,7 @@ class TokenStats:
     solo_occurrences: int = 0
     uppercase_occurrences: int = 0
     latin_occurrences: int = 0
+    cyrillic_occurrences: int = 0
     hyphen_occurrences: int = 0
 
     def score(self) -> float:
@@ -723,8 +736,10 @@ def _collect_candidates(lines: Sequence[str]) -> Tuple[List[LabelCandidate], Dic
                     stat.solo_occurrences += 1
                 if candidate.is_upper:
                     stat.uppercase_occurrences += 1
-                if candidate.has_latin or _contains_latin(token):
+                if candidate.has_latin:
                     stat.latin_occurrences += 1
+                else:
+                    stat.cyrillic_occurrences += 1
                 if candidate.hyphenated:
                     stat.hyphen_occurrences += 1
     return candidates, stats
@@ -737,13 +752,25 @@ def _select_trusted_tokens(stats: Dict[str, TokenStats]) -> set[str]:
             continue
         if _is_generic_like_token(token):
             continue
-        if stat.solo_occurrences:
+        if stat.cyrillic_occurrences and not stat.latin_occurrences and stat.uppercase_occurrences == 0:
+            continue
+        latin_heavy = stat.latin_occurrences > 0
+        uppercase_heavy = stat.uppercase_occurrences > 0
+        hyphen_support = stat.hyphen_occurrences > 0
+        if latin_heavy and (stat.solo_occurrences or hyphen_support or stat.occurrences >= 2):
             trusted.add(token)
             continue
-        if stat.occurrences <= 2 and (stat.uppercase_occurrences or stat.latin_occurrences):
+        if not latin_heavy:
+            if uppercase_heavy and stat.solo_occurrences:
+                trusted.add(token)
+                continue
+            if stat.uppercase_occurrences >= 2 and stat.occurrences >= 2:
+                trusted.add(token)
+                continue
+        if hyphen_support and stat.occurrences >= 2:
             trusted.add(token)
             continue
-        if stat.score() >= 2.5:
+        if stat.score() >= 3.0:
             trusted.add(token)
     return trusted
 
