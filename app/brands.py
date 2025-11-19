@@ -745,11 +745,21 @@ def _fuzzy_brand_lookup(token: str, brand_lookup: Dict[str, str]) -> str | None:
     for candidate, brand in brand_lookup.items():
         if candidate == token:
             return brand
+        # Handle obvious prefix/suffix attachments ("toyotamotor", "камазовские")
+        # before falling back to the slower distance computation.
+        if len(candidate) >= 4 and token.startswith(candidate):
+            suffix = token[len(candidate) :]
+            if suffix and len(suffix) <= 8 and suffix.isalpha():
+                return brand
+        if len(token) >= 4 and candidate.startswith(token):
+            prefix = candidate[len(token) :]
+            if prefix and len(prefix) <= 4 and prefix.isalpha():
+                return brand
         if len(candidate) < 4:
             continue
         if candidate[0] != token[0]:
             continue
-        if abs(len(candidate) - len(token)) > 2:
+        if abs(len(candidate) - len(token)) > max(4, len(candidate) // 2):
             continue
         distance = _damerau_levenshtein(token, candidate)
         max_len = max(len(candidate), len(token))
