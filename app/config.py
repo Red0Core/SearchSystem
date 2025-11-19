@@ -22,6 +22,7 @@ class Settings:
     load_on_startup: bool = _get_env("LOAD_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
     search_result_size: int = int(_get_env("SEARCH_RESULT_SIZE", "100"))
     brand_result_size: int = int(_get_env("BRAND_RESULT_SIZE", "30"))
+    brand_fallback_min_hits: int = int(_get_env("BRAND_FALLBACK_MIN_HITS", "3"))
     offers_source_url: str = _get_env("OFFERS_SOURCE_URL", "")
     manufacturers_source_url: str = _get_env("MANUFACTURERS_SOURCE_URL", "")
 

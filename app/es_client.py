@@ -93,6 +93,7 @@ INDEX_BODY = {
             "search_text_tr": {"type": "text", "analyzer": "standard"},
             "product_code_normalized": {"type": "keyword"},
             "manufacturer_normalized": {"type": "keyword"},
+            "manufacturer_brand_tokens": {"type": "keyword"},
         }
     },
 }
