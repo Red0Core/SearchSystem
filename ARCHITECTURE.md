@@ -88,8 +88,9 @@ catalog:
   the trusted set, producing two maps: `brand_id -> Brand` and
   `token -> brand_id` for O(1) lookups.
 * `extract_brand_ids_from_text` reuses the same tokenizer for manufacturers at
-  index time, and `detect_brands_in_query` performs query-time detection so the
-  classifier and Elasticsearch share a single brand universe.
+  index time, skips the generic nouns before fuzzy matching, and
+  `detect_brands_in_query` performs query-time detection so the classifier and
+  Elasticsearch share a single brand universe.
 
 ## Normalization & classification helpers (`app/utils.py`)
 
@@ -141,12 +142,14 @@ The `search_products` function coordinates the full request lifecycle:
    `track_total_hits=false` and field-specific logic:
    - Article queries prioritize `product_code_normalized` and `title`.
    - URL queries run `multi_match` over `search_text` and transliterated text.
-   - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
-     `constant_score` clause for those canonical IDs, and then use the brand
-     labels to rank within the filtered set.
-   - Brand+generic queries keep the full corpus but add a strong brand boost so
-     matching manufacturers appear first while `non_brand_terms` drive the main
-     `multi_match` clause.
+  - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
+    `constant_score` clause for those canonical IDs, and then use the brand
+    labels to rank within the filtered set; if the filter returns zero hits the
+    service automatically retries without the filter so the user still sees
+    something useful.
+  - Brand+generic queries first run with the same brand filter to guarantee
+    brand-first ordering, but fall back to a boosted, filter-less query if the
+    brand inventory is empty so mixed queries never return blank pages.
    - Generic queries fall back to a standard fuzzy `multi_match` over
      `title`, `search_text`, and `product_code`.
    Transliteration matches optionally add phonetic should-clauses to catch

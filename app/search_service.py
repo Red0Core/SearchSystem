@@ -239,16 +239,23 @@ def search_products(raw_query: str) -> Dict[str, object]:
         ]
 
     hits = es_response.get("hits", {}).get("hits", [])
-    if (
-        classification.get("kind") == QueryKind.BRAND_WITH_GENERIC
-        and classification.get("brands")
-        and len(hits) < settings.brand_fallback_min_hits
-    ):
+    fallback_threshold: int | None = None
+    fallback_kind: QueryKind | None = None
+    if classification.get("brands"):
+        kind_value = classification.get("kind")
+        if kind_value == QueryKind.BRAND_ONLY:
+            fallback_threshold = 1
+            fallback_kind = QueryKind.BRAND_ONLY
+        elif kind_value == QueryKind.BRAND_WITH_GENERIC:
+            fallback_threshold = settings.brand_fallback_min_hits
+            fallback_kind = QueryKind.BRAND_WITH_GENERIC
+    if fallback_threshold is not None and len(hits) < fallback_threshold:
         logger.info(
-            "brand_fallback: q=%r initial_hits=%s threshold=%s",
+            "brand_fallback: q=%r kind=%s initial_hits=%s threshold=%s",
             normalized_query,
+            _serialize_kind(fallback_kind),
             len(hits),
-            settings.brand_fallback_min_hits,
+            fallback_threshold,
         )
         fallback_body = build_es_query(
             normalized_query,
