@@ -428,6 +428,33 @@ POST_TRANSLIT_OVERRIDES = {
     "merce": "mercedes",
     "merse": "mercedes",
 }
+
+# Some legacy indexes and manufacturer exports store canonical brand ids that
+# differ from the normalized ids we produce today.  When we filter or boost by
+# brand we need to include those historic aliases to avoid dropping otherwise
+# relevant documents (for example, older records tagged with "cat" instead of
+# the canonical "caterpillar").
+BRAND_FILTER_ALIASES: dict[str, set[str]] = {
+    "caterpillar": {"cat"},
+}
+
+
+def expand_brand_filter_tokens(brand_ids: Iterable[str]) -> List[str]:
+    """Expand canonical brand ids with known aliases for filtering/boosting."""
+
+    expanded: List[str] = []
+    seen: set[str] = set()
+    for brand in brand_ids:
+        if not brand:
+            continue
+        if brand not in seen:
+            expanded.append(brand)
+            seen.add(brand)
+        for alias in BRAND_FILTER_ALIASES.get(brand, ()):  # pragma: no branch - tiny set
+            if alias and alias not in seen:
+                expanded.append(alias)
+                seen.add(alias)
+    return expanded
 QUERY_STOPWORDS = {
     "the",
     "a",

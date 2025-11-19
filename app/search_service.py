@@ -5,7 +5,7 @@ import logging
 from time import perf_counter
 from typing import Dict, List
 
-from .brands import get_brand_catalog
+from .brands import expand_brand_filter_tokens, get_brand_catalog
 from .cache import get_cache
 from .config import settings
 from .es_client import search_es
@@ -127,6 +127,7 @@ def build_es_query(
         return base_query
 
     brands: List[str] = classification.get("brands", [])
+    brand_filter_values = expand_brand_filter_tokens(brands)
     generic_tokens: List[str] = classification.get("generic_tokens") or classification.get("non_brand_terms") or []
     generic_text = " ".join(generic_tokens).strip()
     brand_catalog = get_brand_catalog()
@@ -157,17 +158,18 @@ def build_es_query(
 
     def apply_brand_filter() -> None:
         nonlocal brand_filter_applied
-        if brands and allow_brand_filter:
-            add_filter({"terms": {"manufacturer_brand_tokens": brands}})
+        if brand_filter_values and allow_brand_filter:
+            add_filter({"terms": {"manufacturer_brand_tokens": brand_filter_values}})
             brand_filter_applied = True
 
     def add_brand_boost(boost: float = 4.0) -> None:
         if not brands:
             return
+        filter_values = brand_filter_values or brands
         add_should(
             {
                 "constant_score": {
-                    "filter": {"terms": {"manufacturer_brand_tokens": brands}},
+                    "filter": {"terms": {"manufacturer_brand_tokens": filter_values}},
                     "boost": boost,
                 }
             }
