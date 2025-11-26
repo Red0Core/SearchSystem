@@ -11,5 +11,7 @@ dependencies = [
     "pydantic",
     "httpx",
     "rapidfuzz>=3.14.3",
+    "Unidecode",
+    "metaphone",
 ]
 

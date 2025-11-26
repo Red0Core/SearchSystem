@@ -14,6 +14,7 @@ services:
       - "9300:9300"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./config/brand_synonyms.txt:/usr/share/elasticsearch/config/brand_synonyms.txt:ro
     restart: unless-stopped
 
 volumes:

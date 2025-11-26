@@ -75,3 +75,7 @@ To reload data from `offers.json`:
 ```bash
 curl -X POST http://localhost:8000/reindex
 ```
+
+> Note: The `/reindex` endpoint is served by FastAPI (default port `8000`).
+> If you accidentally call Elasticsearch directly on port `9200` (e.g. `curl -X POST http://localhost:9200/reindex`),
+> Elasticsearch returns HTTP 405 because it expects the `_reindex` API instead of our application route.
