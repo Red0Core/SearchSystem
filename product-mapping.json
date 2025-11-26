@@ -15,7 +15,15 @@
         "edge_ngram_filter": { "type": "edge_ngram", "min_gram": 2, "max_gram": 10 },
         "code_ngram": { "type": "ngram", "min_gram": 3, "max_gram": 8 },
         "alphanumeric": { "type": "word_delimiter", "generate_number_parts": true, "catenate_numbers": true },
-        "brand_synonyms": { "type": "synonym", "synonyms_path": "brand_synonyms.txt" }
+        "brand_synonyms": {
+          "type": "synonym",
+          "synonyms": [
+            "мерс,мерседес,мерсик,mercedes,mercedes-benz => mercedes-benz",
+            "бэха,бмв,bmw => bmw",
+            "тойота,toyota,таиота,тоиота,тоёта,таёта => toyota",
+            "кэт,кет,котерьпиллар,катерпилер,caterpilar,caterpillar => caterpillar"
+          ]
+        }
       },
       "analyzer": {
         "title_analyzer": {

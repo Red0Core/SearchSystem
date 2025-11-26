@@ -19,11 +19,33 @@ def _load_mapping(mapping_path: Path) -> dict:
         return json.load(fh)
 
 
+def _load_synonyms(path: Path) -> list[str]:
+    """Read synonym rules from a file, ignoring blanks and comments."""
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            return [line.strip() for line in fh if line.strip() and not line.lstrip().startswith("#")]
+    except FileNotFoundError:
+        logger.warning("Synonyms file %s not found; falling back to mapping defaults", path)
+        return []
+
+
 async def ensure_index(es: Elasticsearch) -> None:
     """Create the products index with custom analyzers if it is missing."""
 
     mapping_path = Path(settings.mapping_path)
     body = _load_mapping(mapping_path)
+    brand_synonyms = _load_synonyms(Path(settings.synonyms_path))
+
+    # Ensure the synonym filter works even when Elasticsearch cannot read the file
+    # from its config directory (common in local/hosted setups without mounts).
+    filters = body.get("settings", {}).get("analysis", {}).get("filter", {})
+    brand_filter = filters.get("brand_synonyms", {})
+    if brand_synonyms:
+        brand_filter["synonyms"] = brand_synonyms
+    brand_filter.pop("synonyms_path", None)
+    filters["brand_synonyms"] = brand_filter
+
     exists = await asyncio.to_thread(es.indices.exists, index=settings.es_index)
     if exists:
         return
