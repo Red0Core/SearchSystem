@@ -24,7 +24,7 @@ async def ensure_index(es: Elasticsearch) -> None:
 
     mapping_path = Path(settings.mapping_path)
     body = _load_mapping(mapping_path)
-    exists = await asyncio.to_thread(es.indices.exists, settings.es_index)
+    exists = await asyncio.to_thread(es.indices.exists, index=settings.es_index)
     if exists:
         return
     logger.info("Creating index %s using %s", settings.es_index, mapping_path)
