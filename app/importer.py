@@ -10,7 +10,7 @@ from typing import Iterable
 from elasticsearch import Elasticsearch, helpers
 
 from .config import settings
-from .phonetics import to_phonetic
+from .phonetics import normalize_query, to_phonetic
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ def _prepare_product(raw: dict) -> dict:
     external_id = str(raw.get("externalId") or raw.get("external_id") or raw.get("id") or product_code or title)
 
     phonetic_source = " ".join(part for part in (title, manufacturer) if part)
-    phonetic = to_phonetic(phonetic_source)
+    normalized_phonetic_source = normalize_query(phonetic_source)
+    phonetic = to_phonetic(normalized_phonetic_source)
 
     product = {
         "title": title,

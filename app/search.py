@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 from elasticsearch import Elasticsearch
 
-from .phonetics import normalize_text, to_phonetic
+from .phonetics import normalize_query, to_phonetic
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,10 @@ def _build_query(normalized_q: str, phonetic_q: str | None, limit: int) -> Dict[
 
 
 async def search_products(es: Elasticsearch, index: str, q: str, limit: int = 50) -> dict:
-    normalized_q = normalize_text(q)
+    # Step 1: normalize raw user input (Russian/English) with collapsing repeats
+    # and light synonym handling so phonetics and analyzers see a clean string.
+    normalized_q = normalize_query(q)
+    # Step 2: derive a phonetic key from the normalized string.
     phonetic_q = to_phonetic(normalized_q) if normalized_q else ""
     query_body = _build_query(normalized_q, phonetic_q, limit)
 
