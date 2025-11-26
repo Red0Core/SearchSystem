@@ -62,11 +62,26 @@ def normalize_query(text: str) -> str:
     collapsed = _REPEATED_LETTER_RE.sub(r"\1", lowered)
     cleaned = _LETTER_DIGIT_SPACE_RE.sub(" ", collapsed)
     compact = " ".join(cleaned.split())
+    logger.debug(
+        "normalize_query raw=%r lowered=%r collapsed=%r cleaned=%r compact=%r",
+        text,
+        lowered,
+        collapsed,
+        cleaned,
+        compact,
+    )
     if not compact:
+        logger.debug("normalize_query empty after cleaning")
         return ""
 
     tokens = [BRAND_SYNONYMS.get(token, token) for token in compact.split()]
-    return " ".join(tokens)
+    normalized = " ".join(tokens)
+    logger.info(
+        "normalize_query tokens=%s -> normalized=%r",
+        tokens,
+        normalized,
+    )
+    return normalized
 
 
 def _metaphone_tokens(tokens: Iterable[str]) -> list[str]:
@@ -92,12 +107,23 @@ def to_phonetic(normalized_text: str) -> str:
 
     try:
         if not normalized_text:
+            logger.debug("to_phonetic skipped: empty normalized text")
             return ""
         transliterated = unidecode(normalized_text)
         ascii_only = _ASCII_ALNUM_SPACE_RE.sub(" ", transliterated)
         tokens = ascii_only.split()
         codes = _metaphone_tokens(tokens)
-        return " ".join(codes)
+        phonetic = " ".join(codes)
+        logger.info(
+            "to_phonetic normalized=%r transliterated=%r ascii=%r tokens=%s codes=%s phonetic=%r",
+            normalized_text,
+            transliterated,
+            ascii_only,
+            tokens,
+            codes,
+            phonetic,
+        )
+        return phonetic
     except Exception as exc:  # pragma: no cover - defensive guardrail
         logger.debug("phonetic conversion failed for %r: %s", normalized_text, exc)
         return ""

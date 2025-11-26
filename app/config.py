@@ -24,6 +24,7 @@ class Settings:
     cache_ttl_seconds: int = int(_get_env("CACHE_TTL_SECONDS", "300"))
     load_on_startup: bool = _get_env("LOAD_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
     search_result_size: int = int(_get_env("SEARCH_RESULT_SIZE", "100"))
+    log_level: str = _get_env("LOG_LEVEL", "INFO")
 
 
 settings = Settings()

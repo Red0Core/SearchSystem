@@ -64,7 +64,7 @@ def _build_query(normalized_q: str, phonetic_q: str | None, limit: int) -> Dict[
 
     should.append({"match_all": {"boost": 0.01}})
 
-    return {
+    query = {
         "size": limit,
         "query": {
             "bool": {
@@ -73,6 +73,9 @@ def _build_query(normalized_q: str, phonetic_q: str | None, limit: int) -> Dict[
             }
         },
     }
+
+    logger.debug("ES query payload=%s", query)
+    return query
 
 
 async def search_products(es: Elasticsearch, index: str, q: str, limit: int = 50) -> dict:

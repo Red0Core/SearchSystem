@@ -17,7 +17,7 @@ from .models import ProductResult, SearchResponse
 from .search import search_products
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.getLevelName(settings.log_level.upper()))
 
 app = FastAPI(title="Product Search Service")
 app.mount("/static", StaticFiles(directory="static"), name="static")
