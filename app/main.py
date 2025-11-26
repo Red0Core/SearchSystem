@@ -16,8 +16,18 @@ from .indexing import ensure_index, index_is_empty
 from .models import ProductResult, SearchResponse
 from .search import search_products
 
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_LEVEL = logging.getLevelName(settings.log_level.upper())
+
+# Force a predictable logging setup even when run under uvicorn, so our
+# normalization/phonetic debug statements are visible. ``force=True`` replaces
+# uvicorn's default handlers.
+logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT, force=True)
+for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "elastic_transport"):
+    logging.getLogger(name).setLevel(LOG_LEVEL)
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.getLevelName(settings.log_level.upper()))
+logger.info("Logging configured at %s", settings.log_level.upper())
 
 app = FastAPI(title="Product Search Service")
 app.mount("/static", StaticFiles(directory="static"), name="static")
