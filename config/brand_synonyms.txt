@@ -1,0 +1,4 @@
+мерс,мерседес,mercedes,mercedes-benz => mercedes-benz
+бмв,bmw => bmw
+тойота,toyota => toyota
+котерьпиллар,катерпилер,caterpilar,caterpillar => caterpillar
