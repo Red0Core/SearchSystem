@@ -81,28 +81,6 @@ To reload data from `offers.json`:
 curl -X POST http://localhost:8000/reindex
 ```
 
-## How the search pipeline works
-
-The search stack is described in detail inside
-[`ARCHITECTURE.md`](ARCHITECTURE.md) and
-[`SCORING_AND_SEARCH.md`](SCORING_AND_SEARCH.md). The condensed version:
-
-1. **Brand catalog** — `app/brands.py` parses `manufacturer.txt`, removes
-   article-like noise, and produces canonical brand ids plus a lookup table that
-   powers both ingestion (for `manufacturer_brand_tokens`) and queries.
-2. **ETL** — `app/etl_loader.py` prepares each offer with search-friendly
-   fields such as `search_text`, `search_text_tr`, normalized product codes, and
-   brand token arrays.
-3. **Classification** — every `/search` request is classified as URL,
-   article, `brand_only`, `brand_with_generic`, or `generic_only`. Brand-aware
-   paths keep both canonical ids and the raw generic tokens for Cyrillic search.
-4. **Elasticsearch query** — brand-only paths filter strictly on
-   `manufacturer_brand_tokens`; mixed queries first attempt the same filter and
-   fall back to a boosted query if no hits are found; generic queries lean on
-   fuzziness, phonetics, and transliteration fields.
-5. **Latency guardrail** — cache hits return in <1 ms, while cold queries keep
-   the <0.2 s SLA thanks to the small query bodies and aggressive logging of
-   classification/build/ES timings.
-
-Refer to the documentation files for diagrams, scoring formulas, and bilingual
-descriptions of the entire pipeline.
+> Note: The `/reindex` endpoint is served by FastAPI (default port `8000`).
+> If you accidentally call Elasticsearch directly on port `9200` (e.g. `curl -X POST http://localhost:9200/reindex`),
+> Elasticsearch returns HTTP 405 because it expects the `_reindex` API instead of our application route.

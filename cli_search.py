@@ -1,23 +1,24 @@
-"""Terminal client for the product search API."""
+"""Terminal client that reuses the in-process search logic."""
 from __future__ import annotations
 
 import argparse
+import asyncio
 from pathlib import Path
 from typing import Iterable
 
-import httpx
+from app.config import settings
+from app.es_client import get_client
+from app.search import search_products
 
-API_URL = "http://localhost:8000/search"
 MAX_RESULTS = 100
 GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
 
-def perform_query(query: str) -> dict:
-    response = httpx.get(API_URL, params={"q": query}, timeout=20)
-    response.raise_for_status()
-    return response.json()
+async def perform_query(query: str) -> dict:
+    es = get_client()
+    return await search_products(es, settings.es_index, query, limit=MAX_RESULTS)
 
 
 def interactive_shell() -> None:
@@ -32,11 +33,7 @@ def interactive_shell() -> None:
             continue
         if query.lower() in {"exit", "quit"}:
             return
-        try:
-            response = perform_query(query)
-        except httpx.HTTPError as exc:
-            print(f"Request failed: {exc}")
-            continue
+        response = asyncio.run(perform_query(query))
         pretty_print_response(query, response)
 
 
@@ -51,7 +48,7 @@ def pretty_print_response(query: str, payload: dict) -> None:
         score_repr = f"{score:.2f}" if isinstance(score, (int, float)) else "-"
         print(
             f"  {idx:02d}. score={score_repr} | {item.get('manufacturer')} | "
-            f"{item.get('product_code')} | {item.get('title')}"
+            f"{item.get('productCode')} | {item.get('title')}"
         )
 
 
@@ -61,16 +58,12 @@ def batch_mode(file_path: Path) -> None:
             query = line.strip()
             if not query:
                 continue
-            try:
-                response = perform_query(query)
-            except httpx.HTTPError as exc:
-                print(f"{query}: FAILED ({exc})")
-                continue
+            response = asyncio.run(perform_query(query))
             pretty_print_response(query, response)
 
 
 def main(argv: Iterable[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="CLI client for the search API")
+    parser = argparse.ArgumentParser(description="CLI client for the search service")
     parser.add_argument("query", nargs="?", help="Query string. If omitted, starts REPL mode.")
     parser.add_argument("--batch", type=Path, help="File with queries to execute line by line")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -79,7 +72,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         batch_mode(args.batch)
         return 0
     if args.query:
-        response = perform_query(args.query)
+        response = asyncio.run(perform_query(args.query))
         pretty_print_response(args.query, response)
         return 0
     interactive_shell()
