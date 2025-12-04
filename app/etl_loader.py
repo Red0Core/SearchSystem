@@ -5,11 +5,11 @@ import json
 import logging
 from pathlib import Path
 
-from .brands import init_brands
+from .brands import extract_brand_ids_from_text, get_brand_token_map, init_brands
 from .config import settings
 from .data_files import ensure_data_file
 from .es_client import create_index_if_not_exists, index_documents
-from .utils import normalize_code, normalize_manufacturer, transliterate_query
+from .utils import normalize_code, transliterate_query
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def _prepare_document(raw: dict) -> dict:
     product_code = raw.get("product_code", "")
     title = raw.get("title", "")
     search_text = " ".join(part for part in [manufacturer, product_code, title] if part)
-    manufacturer_normalized = normalize_manufacturer(manufacturer)
+    brand_tokens = extract_brand_ids_from_text(manufacturer, get_brand_token_map())
     document = {
         "id": raw["id"],
         "manufacturer": manufacturer,
@@ -31,8 +31,9 @@ def _prepare_document(raw: dict) -> dict:
         "search_text_tr": transliterate_query(search_text),
         "product_code_normalized": normalize_code(product_code),
     }
-    if manufacturer_normalized:
-        document["manufacturer_normalized"] = manufacturer_normalized
+    if brand_tokens:
+        document["manufacturer_brand_tokens"] = brand_tokens
+        document["manufacturer_normalized"] = brand_tokens[0]
     return document
 
 
