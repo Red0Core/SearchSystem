@@ -15,10 +15,10 @@ flowchart LR
 
     subgraph FastAPI Service
         MAIN[app/main.py]
-        SEARCH[app/search_service.py]
+        SEARCH[app/search.py]
+        PHONETICS[app/phonetics.py]
         UTILS[app/utils.py]
         BRANDS[app/brands.py]
-        CACHE[app/cache.py]
         ESCLIENT[app/es_client.py]
     end
 
@@ -26,18 +26,16 @@ flowchart LR
         OFFERS[offers.json]
         MANUF[manufacturer.txt]
         ES[(Elasticsearch 9.2.1)]
-        REDIS[(Redis / In-memory cache)]
     end
 
     CLI -->|REST /search| MAIN
     HTTP -->|REST /search| MAIN
     MAIN --> SEARCH
-    SEARCH --> CACHE
+    SEARCH --> PHONETICS
     SEARCH --> ESCLIENT
     SEARCH --> BRANDS
     SEARCH --> UTILS
     ESCLIENT --> ES
-    CACHE --> REDIS
     MAIN -->|startup| BRANDS
     MAIN -->|startup| ESCLIENT
     MAIN -->|optional ETL| OFFERS
@@ -46,9 +44,9 @@ flowchart LR
 ```
 
 At startup FastAPI initializes the brand dictionary, ensures Elasticsearch has
-an index (and optionally bulk-loads offers), and prepares the cache backend.
-Every query then flows through classification, cache lookup, ES search, and
-response serialization.
+an index (and optionally bulk-loads offers). Each query goes through lightweight
+normalization, phonetic encoding, Elasticsearch search, and response
+serialization without any cache or branching execution paths.
 
 ## Data ingestion pipeline (`app/etl_loader.py`)
 
@@ -104,28 +102,15 @@ catalog:
    deterministic overrides (Toyota/Lexus/Lukoil/Caterpillar/etc.), optionally
    triggers Damerau–Levenshtein matching against the canonical token list, and
    emits both canonical ids and untouched generic tokens (for Cyrillic search).
-4. **Logging** — `app.utils` logs the classification decision with the detected
-   brand ids and the tokens that were treated as generic, making it easy to
-   diagnose missed matches.
+4. **Logging** — helper functions in `app.utils` keep transliteration and
+   article normalization consistent between ETL and search.
 
-## Normalization & classification helpers (`app/utils.py`)
+## Normalization helpers (`app/utils.py`)
 
-* `normalize_code` still handles deterministic article normalization, while
-  `transliterate_query` switches between Cyrillic and Latin alphabets for generic
-  fuzzy search.
-* `detect_brands_in_query` (from `app/brands.py`) is wired directly into
-  `classify_query`, so every query produces canonical brand IDs alongside both
-  normalized and raw non-brand tokens for downstream ranking.
-* `extract_url_tokens` and `is_probable_article_query` detect structured inputs
-  (URLs and articles) and pre-normalize them before search.
-* `classify_query` orchestrates the above and emits `QueryClassification`:
-  - URLs → `QueryKind.URL`
-  - Article-like strings → `QueryKind.ARTICLE`
-  - Tokens containing only brands → `QueryKind.BRAND_ONLY`
-  - Brand + generic tokens → `QueryKind.BRAND_WITH_GENERIC`
-  - No brands → `QueryKind.GENERIC_ONLY`
-  The classification also stores `non_brand_terms`, normalized codes, and URL
-  tokens for downstream use.
+* `normalize_code` removes non-alphanumeric characters and uppercases product
+  codes for deterministic lookups.
+* `transliterate_query` switches between Cyrillic and Latin alphabets so
+  `search_text_tr` can stay aligned with the primary text fields.
 
 ## Elasticsearch client & index (`app/es_client.py`)
 
@@ -134,59 +119,29 @@ catalog:
   - `brand_phonetic_analyzer` leveraging the phonetic plugin for Double
     Metaphone matches.
   - Fields for `manufacturer`, `title`, `search_text`, transliteration,
-    normalized product codes, and the new `manufacturer_brand_tokens` keyword
-    array used for filtering/boosting.
+    normalized product codes, and an optional `manufacturer_brand_tokens`
+    keyword array for future brand metadata.
 * `search_es` runs the constructed query body, while `get_client` lazily
   configures the `Elasticsearch` instance against the configured host.
 
-## Cache layer (`app/cache.py`)
+## Search execution (`app/search.py`)
 
-* `get_cache` first tries Redis; if unavailable it falls back to an in-memory
-  dict guarded by a lock and TTL timestamps.
-* Both `RedisCache` and `InMemoryCache` expose `get/set` so the search service
-  can treat them identically. Cache keys are SHA-256 hashes of the raw query.
+`search_products` handles the end-to-end request lifecycle without branching or
+cache layers:
 
-## Search execution (`app/search_service.py`)
-
-The `search_products` function coordinates the full request lifecycle:
-
-1. **Cache lookup**: the SHA-256 hash of the raw query becomes the cache key.
-   Cache hits short-circuit the remaining steps and log a cheap timing entry.
-2. **Classification**: `classify_query` identifies URLs, articles, brand intent,
-   and stores `raw_generic_tokens` (unmodified alphabet) alongside normalized
-   ones so Elasticsearch clauses can stay bilingual.
-3. **Query building** (`build_es_query`): constructs a bool query with
-   `track_total_hits=false`, constant field lists, and helper builders for each
-   branch:
-   - Article queries prioritize `product_code_normalized` and `title`.
-   - URL queries run `multi_match` over `search_text` and transliterated text.
-   - Brand-only queries filter on `manufacturer_brand_tokens`, add a boosted
-     `constant_score` clause for those canonical IDs, and then use the brand
-     labels to rank within the filtered set; if the filter returns zero hits the
-     service automatically retries without the filter so the user still sees
-     something useful.
-   - Brand+generic queries first run with the same brand filter to guarantee
-     brand-first ordering; `raw_generic_tokens` are joined as-is, and
-     transliterated tokens are only used when no Cyrillic text is available. If
-     the brand inventory is empty the service rebuilds the query without the
-     filter but keeps brand boosts so the intended manufacturers stay on top.
-   - Generic queries fall back to a standard fuzzy `multi_match` over
-     `title`, `search_text`, and `product_code` plus phonetic should-clauses to
-     catch transliterated mismatches.
-4. **Execution & fallback**: Elasticsearch is called once. If the brand filter
-   returned too few documents (`settings.brand_fallback_min_hits`),
-   `search_products` immediately rebuilds and reruns the query without the
-   filter, logging `brand_fallback=1` for observability.
-5. **Serialization**: results from Elasticsearch are trimmed to the `_source`
-   fields, converted into lightweight dicts, and stored with the measured
-   `took_ms` and overall `eta_ms`. `SCORING_AND_SEARCH.md` dives into the exact
-   boosts, fuzziness, and phonetic weights.
-6. **Timing logs**: every stage (classification, query building, ES call,
-   post-processing) is timed with `perf_counter()` and logged, which makes it
-   easy to spot SLA regressions.
-7. **Caching**: fresh responses are cached for `settings.cache_ttl_seconds`
-   (default 5 minutes), keeping hot queries under a millisecond after the first
-   hit.
+1. **Normalization** — `normalize_query` lowercases input, collapses repeated
+   letters, applies static brand synonyms, and harmonizes digraphs so latin
+   `sch`/`sh` map to the same Cyrillic sound before phonetics.
+2. **Phonetics** — `to_phonetic` transliterates the normalized string to Latin
+   characters and runs double metaphone, yielding stable phonetic tokens even
+   for mixed alphabets.
+3. **Query building** — `_build_query` assembles a bool query with parallel
+   `multi_match` clauses for text fields, optional phonetic fields, and product
+   codes, plus a low-weight `match_all` to keep `minimum_should_match=1`
+   satisfied when inputs are empty.
+4. **Execution & serialization** — Elasticsearch runs the query once; results
+   are flattened into lightweight dicts that keep the score and original source
+   fields for FastAPI/CLI consumers.
 
 ## FastAPI layer (`app/main.py`)
 
@@ -194,8 +149,8 @@ The `search_products` function coordinates the full request lifecycle:
   optionally load offers when configured.
 * `/health` reports ES status.
 * `/search` validates the query string, delegates to `search_products`, and
-  returns a typed `SearchResponse` that includes the detected `classification`
-  and the ETA used by the CLI coloring.
+  returns a typed `SearchResponse` with the normalized query echo, results, and
+  timing for CLI coloring.
 * `/reindex` re-runs the ETL loader on demand.
 
 ## CLI client (`cli_search.py`)
@@ -212,117 +167,67 @@ sequenceDiagram
     participant User
     participant CLI as cli_search.py
     participant API as FastAPI /search
-    participant Service as search_service.py
-    participant Cache
+    participant Service as search.py
     participant ES as Elasticsearch
 
     User->>CLI: Type "комз"
     CLI->>API: HTTP GET /search?q=комз
     API->>Service: search_products("комз")
-    Service->>Cache: GET sha256("комз")
-    Cache-->>Service: miss
-    Service->>Service: classify_query → QueryKind.BRAND_ONLY
-    Service->>ES: search_es(brand-filtered bool query)
-    ES-->>Service: hits (manufacturer_normalized=kamaz)
-    Service->>Cache: SET cache entry (TTL 300s)
+    Service->>Service: normalize_query + to_phonetic
+    Service->>ES: search(bool query with text + phonetic + codes)
+    ES-->>Service: hits
     Service-->>API: results + timing metadata
     API-->>CLI: JSON payload
-    CLI-->>User: Colored ETA + top hits (KamAZ only)
+    CLI-->>User: Colored ETA + top hits (phonetic + fuzzy)
 ```
 
 This flow demonstrates how spelling mistakes are corrected before hitting
-Elasticsearch, guaranteeing that «комз», «камаз», and «kamaz» all reuse the same
-brand filter and therefore return identical inventories.
+Elasticsearch: «комз», «камаз», and «kamaz» all normalize to the same text and
+phonetic keys so the bool query produces comparable inventories.
 
 ## Configuration knobs
 
-* `app/config.py` exposes environment overrides for ES host/index, cache TTL,
-  search result size, and optional download URLs for the data files.
-* `settings.brand_result_size` caps brand-specific result sets so brand-only
-  searches stay fast.
+* `app/config.py` exposes environment overrides for ES host/index, mapping and
+  synonyms paths, the offers file location, `LOAD_ON_STARTUP`, and `LOG_LEVEL`.
 * `settings.load_on_startup` toggles whether the ETL runs automatically when the
   service boots.
 
 ## Extending the system
 
 * Add new brands by appending lines to `manufacturer.txt`; the next startup will
-  rebuild the index with the added synonyms.
+  rebuild the brand catalog used during ETL.
 * Adjust fuzzy sensitivity or transliteration rules inside `app/brands.py` when
   introducing domains with different naming conventions.
 * Extend the search response by editing `app/models.py`—the FastAPI route and
   CLI already deserialize the same schema.
-* Add new query types by extending `QueryKind` and branching inside
-  `classify_query` and `build_es_query`.
 
 ---
 
 # Архитектура системы (RU)
 
-Эта секция дублирует основные мысли документа на русском языке.
+Эта секция дублирует ключевые моменты на русском языке.
 
-## Слои
+## Основные компоненты
 
-* **FastAPI (`app/main.py`)** — маршруты `/search`, `/health`, `/reindex` и
-  инициализация зависимостей.
-* **Бренды (`app/brands.py`)** — чтение `manufacturer.txt`, очистка строк от
-  артикулов/описаний, нормализация токенов (латиница + транслитерация, замена
-  «ё/й», словари опечаток для Toyota/Lexus/Lukoil/Caterpillar и т. д.). Для
-  каждого токена собирается статистика (сколько раз встречался в одиночку,
-  какой регистр, есть ли дефис, какая раскладка) и принимается решение,
-  относить ли его к брендам или к описательным словам. На выходе получаем
-  структуру `Brand` (canonical id + исходные лейблы) и карту «токен → id».
-* **ETL (`app/etl_loader.py`)** — подготавливает документы для Elasticsearch:
-  `search_text`, `search_text_tr`, нормализованные артикулы и массив
-  `manufacturer_brand_tokens` для жёсткого фильтра.
-* **Поиск (`app/search_service.py`)** — кэш, классификация (`classify_query`),
-  хранение «сырых» generic-слов (например, «масло» в кириллице), сборка DSL,
-  вызов Elasticsearch, повтор без фильтра (fallback) и логирование метрик.
-  Подробности про скоуп запросов и `_score` описаны в
-  `SCORING_AND_SEARCH.md`.
-* **Кэш (`app/cache.py`)** — Redis или in-memory обёртка с TTL.
-* **Elasticsearch (`app/es_client.py`)** — индекс `products` с анализаторами
-  `ru_en_search` и `brand_phonetic`, а также полями `search_text_tr` и
-  `manufacturer_brand_tokens`.
+* **FastAPI (`app/main.py`)** — эндпоинты `/health`, `/search`, `/reindex` и запуск загрузки данных при старте.
+* **Поиск (`app/search.py`)** — нормализует запрос, строит фонетический ключ и генерирует один `bool`-запрос в Elasticsearch.
+* **Фонетика (`app/phonetics.py`)** — статические синонимы + диграфы (``sch`` → ``ш`` и т. п.), translit + double metaphone.
+* **Бренды и ETL (`app/brands.py`, `app/etl_loader.py`)** — готовят `search_text`, артикула и вспомогательные брендовые токены при загрузке `offers.json`.
+* **Elasticsearch (`app/es_client.py`)** — создаёт индекс с анализаторами `ru_en_search` и `brand_phonetic`, подтягивает синонимы из `config/brand_synonyms.txt`.
 
-## Жизненный цикл бренда
+## Поток запроса
 
-1. **Старт** — `load_brand_catalog` разбирает весь `manufacturer.txt`, фильтрует
-   строки по паттернам артикулов, дробит `TOYOTA-LEXUS`, анализирует каждый
-   токен и сохраняет два словаря: `brands` и `token → brand id`.
-2. **Индексирование** — `extract_brand_ids_from_text` вызывается для каждого
-   производителя в `offers.json`. Туда попадают только «доверенные» токены;
-   остальные слова (масло, жидкость, город, ...) отбрасываются. Результат
-   записывается в `manufacturer_brand_tokens`.
-3. **Запросы** — `detect_brands_in_query` проходит по каждому слову запроса,
-   применяет те же правила нормализации/транслитерации, использует ограниченный
-   Damerau–Levenshtein для опечаток и возвращает canonical ids + списки generic
-   слов (в исходной и нормализованной форме).
-4. **Логи** — каждая классификация логирует `kind`, `brands`, `non_brand_terms`,
-   что облегчает отладку пропущенных брендов.
+1. Клиент дергает `/search?q=...`.
+2. `normalize_query` приводит строку к нижнему регистру, схлопывает повторы, применяет синонимы и подменяет `sch`/`sh` → `ш`, `zh` → `ж`, `ch` → `ч`.
+3. `to_phonetic` транслитерирует результат в латиницу и вычисляет metaphone.
+4. `_build_query` добавляет `multi_match` по текстовым полям, опциональную фонетическую часть, поиск по артикулам и `match_all` с маленьким бустом.
+5. Elasticsearch отдаёт результаты один раз; FastAPI возвращает плоские dict с `_score` и исходными полями.
 
-## Обработка запроса
+## Настройки
 
-1. Клиент вызывает `/search?q=...`.
-2. `search_products` проверяет кэш и классифицирует запрос: URL, артикул, чистый
-   бренд, бренд + дополнительные слова или generic.
-3. В зависимости от класса собирается `bool`-запрос:
-   * чистый бренд → `filter` по `manufacturer_brand_tokens` + `constant_score`
-     буст + `multi_match` по `manufacturer/title`. Если индекс пуст по бренду,
-     выполняется fallback без фильтра.
-   * бренд + описательные слова → тот же фильтр + `must` по raw generic словам
-     (в оригинальной раскладке). При нехватке документов — повтор без фильтра,
-     но с мощным `should`-бустом бренда.
-   * generic → `multi_match` по `title`, `search_text`, `product_code`, плюс
-     phonetic `should` для транслитерации.
-   * статьи и URL имеют свои ветки (`term` по `product_code_normalized` или
-     расширенный `multi_match` по `search_text*`).
-4. Ответ сериализуется (id, manufacturer, product_code, title, score, timings)
-   и кэшируется. Логируются времена классификации, сборки, вызова ES и
-   постобработки — SLA держим < 200 мс. Вся детализация по полям и бустам
-   приведена в `SCORING_AND_SEARCH.md`.
+* `ES_HOST`, `ES_INDEX`, `MAPPING_PATH`, `SYNONYMS_PATH`, `OFFERS_PATH`, `LOAD_ON_STARTUP`, `LOG_LEVEL` — основные env-переменные (см. `app/config.py`).
 
 ## Где смотреть детали
 
-* `ARCHITECTURE.md` (этот файл) — структура приложения и точки расширения.
-* `SCORING_AND_SEARCH.md` — формулы для `_score`, порядок выполнения запросов,
-  объяснение fallback-логики.
+* `ARCHITECTURE.md` — структура приложения и точки расширения.
+* `SCORING_AND_SEARCH.md` — формулы для `_score`, порядок выполнения запросов, влияние фонетики.

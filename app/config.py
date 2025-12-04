@@ -19,11 +19,7 @@ class Settings:
     mapping_path: str = _get_env("MAPPING_PATH", "product-mapping.json")
     synonyms_path: str = _get_env("SYNONYMS_PATH", "config/brand_synonyms.txt")
     offers_path: str = _get_env("OFFERS_PATH", "offers.json")
-    redis_host: str = _get_env("REDIS_HOST", "localhost")
-    redis_port: int = int(_get_env("REDIS_PORT", "6379"))
-    cache_ttl_seconds: int = int(_get_env("CACHE_TTL_SECONDS", "300"))
     load_on_startup: bool = _get_env("LOAD_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
-    search_result_size: int = int(_get_env("SEARCH_RESULT_SIZE", "100"))
     log_level: str = _get_env("LOG_LEVEL", "INFO")
 
 

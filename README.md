@@ -1,16 +1,15 @@
 # Product Search Service
 
-FastAPI-based information-retrieval service that ranks spare-part offers with a
-brand-first strategy. The stack is Elasticsearch 9.2.1 for search, optional
-Redis for caching, and a Python (3.13+) application layer that performs brand
-normalization, transliteration, and query re-ranking.
+FastAPI-based information-retrieval service that ranks spare-part offers with
+static synonyms and phonetic matching. The stack is Elasticsearch 9.2.1 for
+search and a Python (3.13+) application layer that performs normalization,
+transliteration, and query scoring.
 
 ## Prerequisites
 
 - Python 3.13+
 - [uv](https://github.com/astral-sh/uv) for dependency management
 - Elasticsearch 9.2.1 running locally at `http://localhost:9200`
-- Optional: Redis at `localhost:6379` (in-memory cache is used if Redis is not available)
 
 ## Setup
 
