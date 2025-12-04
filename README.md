@@ -1,6 +1,9 @@
 # Product Search Service
 
-A minimal FastAPI-based REST search service backed by Elasticsearch 9.2.1 and optional Redis caching.
+FastAPI-based information-retrieval service that ranks spare-part offers with a
+brand-first strategy. The stack is Elasticsearch 9.2.1 for search, optional
+Redis for caching, and a Python (3.13+) application layer that performs brand
+normalization, transliteration, and query re-ranking.
 
 ## Prerequisites
 
@@ -34,7 +37,9 @@ present in the project root.
 uv run uvicorn app.main:app --reload
 ```
 
-On startup, the app creates the `products` index and (optionally) loads `offers.json` if it is empty.
+On startup, the app creates the `products` index, rebuilds the brand catalog
+from `manufacturer.txt`, and (optionally) loads `offers.json` if the index is
+empty.
 
 ### Health check
 
