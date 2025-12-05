@@ -97,3 +97,7 @@ transliteration or phonetic fields are added).
 > Note: The `/reindex` endpoint is served by FastAPI (default port `8000`).
 > If you accidentally call Elasticsearch directly on port `9200` (e.g. `curl -X POST http://localhost:9200/reindex`),
 > Elasticsearch returns HTTP 405 because it expects the `_reindex` API instead of our application route.
+
+## Дополнительные материалы (рус.)
+
+- `docs/ALGORITHM_RU.md` — кратко о том, какие проблемы решает поиск, как устроен алгоритм и какие ограничения пока остаются.
