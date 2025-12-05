@@ -56,28 +56,23 @@ def normalize_query(text: str) -> str:
     Mirrors the legacy Java ``SearchService`` normalization:
 
     1. Lowercase the input.
-    2. Normalize common Latin digraphs to their Cyrillic phonemes so ``sch``
-       and ``sh`` both become ``ш`` (and similar for ``zh``/``ch``), keeping
-       phonetic output stable across alphabets.
-    3. Collapse repeated letters using the ``(\p{L})\1+ -> $1`` style regex
+    2. Collapse repeated letters using the ``(\p{L})\1+ -> $1`` style regex
        (e.g. ``"ооочень"`` → ``"очень"``).
-    4. Strip everything except letters (Cyrillic+Latin), digits, and spaces.
-    5. Collapse multiple spaces and trim.
-    6. Apply a tiny Python-side synonym map so colloquial brand aliases map to
+    3. Strip everything except letters (Cyrillic+Latin), digits, and spaces.
+    4. Collapse multiple spaces and trim.
+    5. Apply a tiny Python-side synonym map so colloquial brand aliases map to
        canonical tokens (e.g. ``"мерс"`` → ``"мерседес"``, ``"беха"`` →
        ``"bmw"``) before phonetic generation.
     """
 
     lowered = (text or "").lower()
-    harmonized = _apply_phonetic_overrides(lowered)
-    collapsed = _REPEATED_LETTER_RE.sub(r"\1", harmonized)
+    collapsed = _REPEATED_LETTER_RE.sub(r"\1", lowered)
     cleaned = _LETTER_DIGIT_SPACE_RE.sub(" ", collapsed)
     compact = " ".join(cleaned.split())
     logger.debug(
-        "normalize_query raw=%r lowered=%r harmonized=%r collapsed=%r cleaned=%r compact=%r",
+        "normalize_query raw=%r lowered=%r collapsed=%r cleaned=%r compact=%r",
         text,
         lowered,
-        harmonized,
         collapsed,
         cleaned,
         compact,
@@ -125,10 +120,13 @@ def _metaphone_tokens(tokens: Iterable[str]) -> list[str]:
 def to_phonetic(normalized_text: str) -> str:
     """Generate a phonetic key from **already normalized** text.
 
-    1. Transliterate Cyrillic → Latin using ``unidecode`` to keep tokens
+    1. Harmonize common Latin digraphs with their Cyrillic phonetic
+       counterparts so ``bosch`` and ``bosh`` both collapse to ``ш`` before
+       transliteration.
+    2. Transliterate Cyrillic → Latin using ``unidecode`` to keep tokens
        comparable across scripts.
-    2. Retain only Latin letters/digits/spaces (phonetic encoders expect ASCII).
-    3. Run double metaphone per token to approximate Beider–Morse behavior.
+    3. Retain only Latin letters/digits/spaces (phonetic encoders expect ASCII).
+    4. Run double metaphone per token to approximate Beider–Morse behavior.
 
     Any error results in an empty string, mirroring the defensive Java helper.
     """
@@ -137,14 +135,16 @@ def to_phonetic(normalized_text: str) -> str:
         if not normalized_text:
             logger.debug("to_phonetic skipped: empty normalized text")
             return ""
-        transliterated = unidecode(normalized_text)
+        harmonized = _apply_phonetic_overrides(normalized_text)
+        transliterated = unidecode(harmonized)
         ascii_only = _ASCII_ALNUM_SPACE_RE.sub(" ", transliterated)
         tokens = ascii_only.split()
         codes = _metaphone_tokens(tokens)
         phonetic = " ".join(codes)
         logger.info(
-            "to_phonetic normalized=%r transliterated=%r ascii=%r tokens=%s codes=%s phonetic=%r",
+            "to_phonetic normalized=%r harmonized=%r transliterated=%r ascii=%r tokens=%s codes=%s phonetic=%r",
             normalized_text,
+            harmonized,
             transliterated,
             ascii_only,
             tokens,
