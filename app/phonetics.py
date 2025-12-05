@@ -47,6 +47,12 @@ BRAND_SYNONYMS: dict[str, str] = {
     "беха": "bmw",
     "бмв": "bmw",
     "тойота": "toyota",
+    "котерепилор": "caterpillar",
+    "котерпилор": "caterpillar",
+    "котерпиллар": "caterpillar",
+    "котерьпилор": "caterpillar",
+    "катерпилер": "caterpillar",
+    "катерпиллар": "caterpillar",
 }
 
 
