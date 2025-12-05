@@ -10,7 +10,7 @@ from typing import Iterable
 from elasticsearch import Elasticsearch, helpers
 
 from .config import settings
-from .phonetics import normalize_query, to_phonetic
+from .phonetics import normalize_query, to_phonetic, transliterate_text
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,11 @@ def _prepare_product(raw: dict) -> dict:
     external_id = str(raw.get("externalId") or raw.get("external_id") or raw.get("id") or product_code or title)
 
     phonetic_source = " ".join(part for part in (title, manufacturer) if part)
+    normalized_title = normalize_query(title)
     normalized_phonetic_source = normalize_query(phonetic_source)
     phonetic = to_phonetic(normalized_phonetic_source)
+    transliterated_title = transliterate_text(title)
+    title_phonetic = to_phonetic(normalized_title)
 
     product = {
         "title": title,
@@ -45,6 +48,8 @@ def _prepare_product(raw: dict) -> dict:
         "productCode": product_code,
         "externalId": external_id,
         "phonetic": phonetic,
+        "titleTranslit": transliterated_title,
+        "titlePhonetic": title_phonetic,
     }
 
     for field in ("price", "category", "currency"):
