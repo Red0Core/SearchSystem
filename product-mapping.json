@@ -96,6 +96,15 @@
           "autocomplete": { "type": "text", "analyzer": "autocomplete" }
         }
       },
+      "titleTranslit": {
+        "type": "text",
+        "analyzer": "title_analyzer",
+        "fields": {
+          "phonetic": { "type": "text", "analyzer": "phonetic_analyzer" },
+          "autocomplete": { "type": "text", "analyzer": "autocomplete" }
+        }
+      },
+      "titlePhonetic": { "type": "text" },
       "phonetic": { "type": "text" },
       "externalId": { "type": "keyword" },
       "price": { "type": "float" },

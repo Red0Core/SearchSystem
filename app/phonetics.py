@@ -91,6 +91,35 @@ def normalize_query(text: str) -> str:
     return normalized
 
 
+def transliterate_text(text: str) -> str:
+    """Transliterate arbitrary text into ASCII while keeping tokens searchable.
+
+    The steps mirror :func:`normalize_query` but keep the output constrained to
+    ASCII so it can be indexed alongside Latin terms:
+
+    1. Normalize (lowercase + collapse repeats + strip punctuation).
+    2. Transliterate Cyrillic → Latin using ``unidecode``.
+    3. Remove any leftover non-alphanumeric symbols.
+    4. Collapse whitespace.
+    """
+
+    normalized = normalize_query(text)
+    if not normalized:
+        return ""
+    transliterated = unidecode(normalized)
+    ascii_only = _ASCII_ALNUM_SPACE_RE.sub(" ", transliterated)
+    compact = " ".join(ascii_only.split())
+    logger.info(
+        "transliterate_text raw=%r normalized=%r transliterated=%r ascii=%r compact=%r",
+        text,
+        normalized,
+        transliterated,
+        ascii_only,
+        compact,
+    )
+    return compact
+
+
 def _apply_phonetic_overrides(value: str) -> str:
     """Unify common Latin digraphs with their Cyrillic phonetic counterparts.
 

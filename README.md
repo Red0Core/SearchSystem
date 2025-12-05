@@ -1,9 +1,9 @@
 # Product Search Service
 
 FastAPI-based information-retrieval service that ranks spare-part offers with
-static synonyms and phonetic matching. The stack is Elasticsearch 9.2.1 for
-search and a Python (3.13+) application layer that performs normalization,
-transliteration, and query scoring.
+static synonyms, transliteration, and phonetic matching. The stack is
+Elasticsearch 9.2.1 for search and a Python (3.13+) application layer that
+performs normalization, transliteration, phonetic encoding, and query scoring.
 
 ## Prerequisites
 
@@ -52,6 +52,17 @@ curl http://localhost:8000/health
 curl --get 'http://localhost:8000/search' --data-urlencode 'q=тойота'
 ```
 
+### How queries are processed
+
+1. Normalize (lowercase, collapse repeats, strip punctuation, apply brand
+   aliases).
+2. Transliterate the normalized string to ASCII so Latin/Cyrillic input share a
+   common `titleTranslit` field.
+3. Generate phonetic keys (Double Metaphone) from the normalized string and
+   store them in `titlePhonetic` plus a document-level `phonetic` field.
+4. Run one bool query combining text, transliteration, phonetic, and
+   product-code clauses with fuzziness.
+
 ## CLI client
 
 Interactive usage:
@@ -79,6 +90,9 @@ To reload data from `offers.json`:
 ```bash
 curl -X POST http://localhost:8000/reindex
 ```
+
+Reindex whenever `product-mapping.json` changes (for example, when new
+transliteration or phonetic fields are added).
 
 > Note: The `/reindex` endpoint is served by FastAPI (default port `8000`).
 > If you accidentally call Elasticsearch directly on port `9200` (e.g. `curl -X POST http://localhost:9200/reindex`),
