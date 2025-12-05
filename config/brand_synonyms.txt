@@ -2,3 +2,14 @@
 бэха,бмв,bmw => bmw
 тойота,toyota,таиота,тоиота,тоёта,таёта => toyota
 кэт,кет,котерьпиллар,катерпилер,caterpilar,caterpillar => caterpillar
+хендай,хундай,hyundai,hundai => hyundai
+киа,kia => kia
+ниссан,nissan => nissan
+хонда,honda => honda
+митсубиси,митсубиши,mitsubishi => mitsubishi
+мазда,mazda => mazda
+форд,ford => ford
+шевроле,chevrolet,chevy => chevrolet
+рено,ренош,renault => renault
+фольксваген,фольцваген,vw,volkswagen => volkswagen
+ауди,audi => audi
