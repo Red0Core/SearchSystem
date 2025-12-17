@@ -21,7 +21,7 @@
             "мерс,мерседес,мерсик,mercedes,mercedes-benz => mercedes-benz",
             "бэха,бмв,bmw => bmw",
             "тойота,toyota,таиота,тоиота,тоёта,таёта => toyota",
-            "кэт,кет,котерьпиллар,катерпилер,caterpilar,caterpillar => caterpillar"
+            "кэт,кет,котерепилор,котерпилор,котерьпилор,катерпилер,катерпиллар,caterpilar,caterpillar => caterpillar"
           ]
         }
       },
@@ -96,6 +96,15 @@
           "autocomplete": { "type": "text", "analyzer": "autocomplete" }
         }
       },
+      "titleTranslit": {
+        "type": "text",
+        "analyzer": "title_analyzer",
+        "fields": {
+          "phonetic": { "type": "text", "analyzer": "phonetic_analyzer" },
+          "autocomplete": { "type": "text", "analyzer": "autocomplete" }
+        }
+      },
+      "titlePhonetic": { "type": "text" },
       "phonetic": { "type": "text" },
       "externalId": { "type": "keyword" },
       "price": { "type": "float" },
