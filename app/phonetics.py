@@ -2,9 +2,9 @@
 
 Two-step pipeline expected by the new search flow:
 
-1) :func:`normalize_query` cleans the user text (lowercase, collapse repeated
-   letters, strip punctuation) and applies a small Python-side synonym map so
-   that aliases like ``"мерс"`` turn into ``"мерседес"`` *before* phonetics.
+    1) :func:`normalize_query` cleans the user text (lowercase, collapse repeated
+       letters, strip punctuation) and applies a small Python-side synonym map so
+       that aliases like ``"мерс"`` turn into ``"мерседес"`` *before* phonetics.
 2) :func:`to_phonetic` accepts the normalized string, transliterates
    Cyrillic -> Latin, and generates a phonetic code (double metaphone) so that
    wildly misspelled queries such as ``"котерьпиллар"`` still align with
@@ -201,6 +201,14 @@ def normalize_query(text: str) -> str:
     5. Apply a tiny Python-side synonym map so colloquial brand aliases map to
        canonical tokens (e.g. ``"мерс"`` → ``"мерседес"``, ``"беха"`` →
        ``"bmw"``) before phonetic generation.
+
+    Notes
+    -----
+    We explicitly **do not** run phonetic digraph rewrites here. The raw
+    normalized text feeds "most_fields" matches that rely on English analyzers
+    (lowercase + asciifold). Replacing ``sh/ch/zh/sch`` with Cyrillic would drop
+    those Latin tokens from the analyzer pipeline and recreate the regression
+    flagged in PR review (e.g. ``"bosch"`` turning into ``"boш"``).
     """
 
     lowered = (text or "").lower()
